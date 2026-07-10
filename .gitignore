@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.env
+*.log
+
+# PRIVATE - never published, never in a public repo
+docs/SECURITY.md
+claude.md
+CLAUDE_HISTORY.md
+
+# vendored OKX skill docs - reinstall via install.sh, not part of Vidimus's own code
+.agents/
+skills-lock.json
