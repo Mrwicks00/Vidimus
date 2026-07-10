@@ -116,24 +116,36 @@ affects it (it only ever contributes UNVERIFIABLE line items the caller can read
 Let `S` = set of criteria with tier ∈ {1,2}.
 
 ```
-if S is empty:                       headline = UNVERIFIABLE   // nothing checkable existed
-elif any(c.result == FAIL for c in S):        headline = FAIL
-elif all(c.result == PASS for c in S):        headline = PASS
-elif any(c.result == UNVERIFIABLE for c in S)
-     and no FAIL:
-        if all non-UNVERIFIABLE are PASS:      headline = PARTIAL   // some checkable, some blocked
-        else:                                  headline = PARTIAL
-else:                                          headline = PARTIAL   // mix of PASS/PARTIAL
+if S is empty:                                  headline = UNVERIFIABLE  // nothing checkable existed
+elif any(c.result == FAIL
+         and c.source == EXPLICIT for c in S):  headline = FAIL
+elif all(c.result == PASS for c in S):          headline = PASS
+else:                                           headline = PARTIAL       // any INFERRED-only FAIL,
+                                                                          // any UNVERIFIABLE, or a
+                                                                          // PASS/PARTIAL mix
 ```
 
 Rules of thumb encoded above:
-- **Any FAIL in scope → FAIL.** One real failure sinks the delivery; that's the honest signal.
+- **Any EXPLICIT FAIL in scope → FAIL.** A stated requirement not met sinks the delivery;
+  that's the honest signal.
+- **An INFERRED-only FAIL is capped at PARTIAL, never FAIL.** An INFERRED criterion is *our*
+  interpretation of the spec, not something the buyer actually wrote down (§6 rule 2). If
+  we inferred wrong, that's our liability to disclose, not proof the deliverable failed a
+  stated requirement — it must not sink the headline to FAIL on its own. `summary` must name
+  the INFERRED criterion, its `inference_note`, and why the headline was capped rather than
+  sunk. (If an EXPLICIT FAIL is *also* present in `S`, EXPLICIT wins and headline is FAIL —
+  the cap only applies when INFERRED FAILs are the only FAILs in scope.)
 - **All PASS → PASS.** Clean.
-- **Anything blocked/partial but nothing failed → PARTIAL**, and `summary` must say which
-  criteria were UNVERIFIABLE and why, so the caller can decide.
+- **Anything blocked/partial but nothing (EXPLICIT-)failed → PARTIAL**, and `summary` must say
+  which criteria were UNVERIFIABLE (or INFERRED-FAIL-capped) and why, so the caller can decide.
 - **Nothing checkable at all → UNVERIFIABLE** headline (don't fake a PASS on an all-taste job).
 
-`headline_basis` lists exactly the `S` criterion ids that drove the result.
+`headline_basis` lists every id in `S` — i.e. all Tier 1–2 criteria that fed the computation,
+not just the subset that happened to decide the branch taken.
+
+**Locked (see `CLAUDE.md` §1 L11):** the EXPLICIT/INFERRED distinction above is settled product
+behavior, not an open question — do not relitigate it in code or re-derive a different rule
+from first principles.
 
 ---
 

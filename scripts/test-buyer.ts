@@ -1,7 +1,8 @@
-// Drives the real D1 round-trip against the live tunnel URL, acting as the paying buyer:
+// Drives the real D1/D2 round-trip against a live server, acting as the paying buyer:
 // hit /verify -> get 402 -> decode accepts -> approve Permit2 (first run only) -> sign
-// PermitTransferFrom -> replay with PAYMENT-SIGNATURE -> print the settlement + verdict.
+// PermitTransferFrom -> replay with PAYMENT-SIGNATURE + a spec body -> print the verdict.
 import "dotenv/config";
+import { readFileSync } from "node:fs";
 import { createPublicClient, createWalletClient, http, maxUint256 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { PaymentRequirements, Permit2Authorization, PaymentSignatureHeader, PaymentResponse } from "../src/x402/types.js";
@@ -15,9 +16,25 @@ function required(name: string): string {
 
 const targetUrl = process.argv[2];
 if (!targetUrl) {
-  console.error("Usage: npm run test-buyer -- <https://tunnel-url>/verify");
+  console.error("Usage: npm run test-buyer -- <https://tunnel-url>/verify [spec-file]");
   process.exit(1);
 }
+
+const DEFAULT_SPEC = `Mint an NFT on X Layer for our new "Sunset Riders" collection.
+
+Requirements:
+- Deploy an ERC-721 contract with the name "Sunset Riders" and symbol "SNRD".
+- Mint exactly 1 token (tokenId 1) to our team wallet 0x2085D86C5EC584f337738E9AA8A0c566Fe86f0a9.
+- The token's metadata URI must point to an image we already uploaded to IPFS; the trait list
+  must include "Background", "Rider", and "Sky" attributes.
+- The mint transaction must succeed on X Layer testnet (chainId 1952) and be confirmed
+  (not just submitted).
+- Total gas spent on the mint should be reasonable for a single ERC-721 mint - flag it if it
+  looks like something else (e.g. a batch mint or an unrelated contract call) got charged
+  against this job instead.`;
+
+const specPath = process.argv[3];
+const spec = specPath ? readFileSync(specPath, "utf8") : DEFAULT_SPEC;
 
 const rpcUrl = required("RPC_URL");
 const chainId = Number(process.env.CHAIN_ID ?? 1952);
@@ -101,10 +118,11 @@ async function main() {
   };
   const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString("base64url");
 
-  console.log("Replaying with PAYMENT-SIGNATURE...");
+  console.log("Replaying with PAYMENT-SIGNATURE and a spec body...");
   const second = await fetch(targetUrl, {
     method: "POST",
-    headers: { "PAYMENT-SIGNATURE": encodedHeader },
+    headers: { "PAYMENT-SIGNATURE": encodedHeader, "content-type": "application/json" },
+    body: JSON.stringify({ spec }),
   });
 
   const body = await second.text();
@@ -118,7 +136,9 @@ async function main() {
 
   console.log("\n--- SUCCESS ---");
   console.log("Settlement:", settlement);
-  console.log("Verdict body:", JSON.parse(body));
+  const verdict = JSON.parse(body);
+  console.log(`Criteria compiled: ${verdict.criteria?.length ?? 0}`);
+  console.log(JSON.stringify(verdict, null, 2));
 
   const receipt = await publicClient.getTransactionReceipt({ hash: settlement.transaction });
   console.log(`\nOn-chain confirmation: status=${receipt.status}, block=${receipt.blockNumber}`);

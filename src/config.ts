@@ -16,4 +16,5 @@ export const config = {
   priceAtomic: BigInt(process.env.PRICE_ATOMIC ?? "10000"),
   erc8004Id: process.env.ERC8004_ID ?? "",
   erc8004Address: (process.env.ERC8004_ADDRESS ?? "") as `0x${string}` | "",
+  anthropicApiKey: required("ANTHROPIC_API_KEY"),
 };
