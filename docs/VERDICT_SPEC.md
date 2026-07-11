@@ -53,6 +53,10 @@ The atomic unit. One per checkable requirement. This is where P1 and P2 live.
   "inference_note": "spec said 'bridge my USDC' — amount inferred from prior line",  // required IFF source=INFERRED
   "tier": 1,                              // P2: 1 mechanical | 2 grounded | 3 taste
   "method": "onchain.transfer_check",     // which checker/technique ran (see registry §3)
+  "locator": { "method": "onchain.transfer_check", "index": 0 },  // WHERE in the deliverable
+                                           // this criterion binds - see §2.2. Absent when
+                                           // method is null or has no locator scheme (Tier 2/3
+                                           // content methods, taste.refused).
   "result": "PASS|FAIL|PARTIAL|UNVERIFIABLE",
   "confidence": 1.0,                      // see §2.1
   "evidence": {                           // REQUIRED for every non-UNVERIFIABLE result
@@ -72,7 +76,52 @@ The atomic unit. One per checkable requirement. This is where P1 and P2 live.
 - **Tier 3** → `result` is **always UNVERIFIABLE**, `confidence` omitted/`null`, `evidence.kind`
   = `none`. No exceptions.
 
-### 2.2 The four results, defined
+### 2.2 Locator binding (D4.5, 2026-07-10)
+
+`locator` is how a criterion is deterministically bound to the specific value in the
+deliverable it judges, replacing the D3/D4 positional-cursor shortcut (Nth criterion of a
+method matched to the Nth deliverable claim of that method, recomputed by loop position and
+never stored). Tier-1 deterministic: no LLM, no fuzzy/semantic matching. The criterion
+declares where to look; the deliverable can never redirect which criterion it satisfies.
+
+**Grammar — typed extractor, not a raw JSON pointer:**
+```jsonc
+{ "method": "onchain.transfer_check", "index": 0 }
+```
+`method` is a value from the §3 registry; `index` is the 0-based ordinal occurrence of that
+method among the job's `criteria[]`. Chosen over a general path string (e.g. RFC 6901 JSON
+Pointer) because the deliverable is a closed, flat `method -> claim[]` map that is already
+Zod-validated per method at quarantine (`SECURITY.md` §2.1) — a typed `{method, index}` pair
+resolves with a direct array lookup, no path parsing/escaping/validation surface, and stays
+trivially constrainable in the M2 compiler's structured-output schema the same way `method`
+already is.
+
+**Who assigns it, and when:** the M2 compiler, immediately after tagging each criterion's
+`method`, in the same pass that produces `criteria[]` — before any deliverable exists.
+`index` is a pure function of criteria order (how many earlier criteria in this compile
+output already had that method). Present for `onchain.*` (D4.5), `data.*` (D5 M3.B),
+`code.*` (D5 M3.C), and `content.presence` / `content.format` / `content.bounds` /
+`content.pattern` (D6.A M4 Tier-1) — every method family backed by a deliverable-provided
+claim array; absent for `method: null` and for method families with no locator scheme yet
+(`content.coverage` / `content.source_grounding` / `content.no_hallucination` — Tier 2,
+deferred post-hackathon — and `taste.refused`).
+
+**Resolution contract:**
+- No `locator` → not a locator-bound criterion; unaffected by this section.
+- `locator` present but doesn't resolve (no claims submitted for `method`, `index` out of
+  range, or quarantine rejected that exact slot) → **UNVERIFIABLE**, never FAIL.
+- `locator` resolves to more than one value → **UNVERIFIABLE**, never take-first, never
+  guess. For the `{method, index}` grammar this is unreachable by construction — an integer
+  index into an array denotes at most one element, and `index` is assigned as a strict
+  bijection over same-method criteria by the compiler's single pass — so the rule is
+  satisfied by grammar choice, not a runtime branch. Recorded here rather than papered over
+  with dead code, matching this doc's practice of stating what wasn't (and can't be) live-
+  exercised rather than implying it was.
+- `locator` resolves to exactly one value → bind it, hand it to the criterion's existing
+  checker unchanged. Checker output feeds §4 headline computation exactly as before — no new
+  verdict states.
+
+### 2.3 The four results, defined
 - **PASS** — criterion met, with evidence.
 - **FAIL** — criterion not met, with evidence showing the gap.
 - **PARTIAL** — measurably partially met (e.g. "3 code examples required, 2 present"); evidence
@@ -94,13 +143,16 @@ The atomic unit. One per checkable requirement. This is where P1 and P2 live.
 | `onchain.transfer_check` | 1 | M3 onchain | tx |
 | `onchain.owner_check` | 1 | M3 onchain | tx |
 | `onchain.destination_check` | 1 | M3 onchain | tx |
-| `onchain.safety` (via okx-security) | 1 | M3 onchain | tx |
+| `onchain.safety` (via `okx-agentic-wallet` bundled `security token-scan`/`tx-scan`) | 1 | M3 onchain | tx |
 | `data.schema` | 1 | M3 data | extract |
 | `data.rowcount` | 1 | M3 data | extract |
 | `data.sample_verify` | 1 | M3 data | sample |
 | `code.compiles` | 1 | M3 sandbox | test_output |
 | `code.tests_pass` | 1 | M3 sandbox | test_output |
-| `content.countable` (words, sections, N examples) | 1 | M4 | extract |
+| `content.presence` (required heading/json_key/csv_column/literal, via locator) | 1 | M4 | extract |
+| `content.format` (re-validates the asset's own declared format: json/csv_headers/markdown_structure) | 1 | M4 | extract |
+| `content.bounds` (word/char/line/section count vs declared min/max) | 1 | M4 | extract |
+| `content.pattern` (matches a vetted pattern: email/url/iso_date/semver — never a caller-supplied regex, ReDoS hardening) | 1 | M4 | extract |
 | `content.coverage` | 2 | M4 | source_check |
 | `content.source_grounding` | 2 | M4 | source_check |
 | `content.no_hallucination` | 2 | M4 | source_check |
@@ -157,20 +209,47 @@ it mechanically without trusting us (mirrors APP's own credential-signature prim
 **Canonicalization**
 1. Take the verdict object **without** the `signature` field.
 2. Serialize with deterministic JSON (sorted keys within each object, no insignificant
-   whitespace, UTF-8, arrays in given order). Record the exact canonicalization lib/version
-   in `PLATFORM.md` once chosen — both signer and verifier must use the same.
-3. `digest = keccak256(canonical_bytes)`.
+   whitespace, UTF-8, arrays in given order). Implementation: `src/verdict/canonicalize.ts`, a
+   hand-rolled recursive serializer (no RFC 8785 library — the schema has no exotic numeric
+   edge cases: `confidence` is `null` or a decimal in `[0,1]`, tiers are `1|2|3`, everything
+   else is strings/arrays/objects).
+3. `digest = keccak256(canonical_bytes)`. Carried in the signing machinery as the content
+   fingerprint, but see the correction below — it is **not** what is directly ECDSA'd.
 
-**Signing**
-- ECDSA (secp256k1) with the verifier's signing key, the same key registered to our
-  **ERC-8004 identity** on X Layer (chain 196).
-- `signature` = `0x` + r‖s‖v.
+**Correction (D4, 2026-07-10 — key-custody constraint discovered, live-tested before coding):**
+the signing key is TEE-secured inside the OKX Agentic Wallet (`SECURITY.md` T4 /
+`PLATFORM.md` §3) — it can never be exported for a raw ECDSA-over-arbitrary-digest operation.
+The **only** signing primitive the wallet exposes is `onchainos wallet sign-message
+--type personal|eip712` (EIP-191 personal_sign or EIP-712 typed data — see
+`.agents/skills/okx-agentic-wallet/references/wallet-cli-reference.md` §"Sign Message"). So:
 
-**What a verifier checks (and what we publish so they can):**
-1. Recompute `digest` from the received verdict minus `signature`.
-2. `ecrecover(digest, signature)` == `signer.address`.
+- **Signing**: `signature` = EIP-191 **personal_sign** over the **canonical JSON string itself**
+  (not the digest) — `onchainos wallet sign-message --chain 196 --from <signer.address>
+  --type personal --message <canonical_json>`. Live-verified against the real agentic wallet
+  before this was accepted as the scheme: a `personal` signature over an arbitrary test string
+  recovers correctly via `viem`'s standard `recoverMessageAddress`, with zero custom
+  EIP-191-prefix handling needed on the verify side.
+- **Verify path** (§ below) is therefore `recoverMessageAddress({message: canonical_json,
+  signature})` (viem or any EIP-191-aware library) — not a hand-rolled
+  `ecrecover(digest, signature)`. This is arguably *more* portable than raw-digest ecrecover
+  (every wallet's "sign message" UI produces exactly this shape), not less secure — but it is a
+  deviation from this section's original literal text, recorded here per the "doc wins, fix the
+  doc first" rule rather than silently diverging in code.
+- `digest` remains useful as an audit/content-fingerprint value (e.g. for logs), it just isn't
+  the thing ECDSA is applied to.
+
+**Signing key**: ECDSA (secp256k1), the same key registered to our **ERC-8004 identity** on
+X Layer (chain 196) — confirmed live (D4) that the currently-authenticated Agentic Wallet
+session's address equals agentId 4933's `ownerAddress`/`agentWalletAddress`, and is distinct
+from the facilitator/settlement address.
+
+**What a verifier checks (and what we publish so they can — see `scripts/verify-verdict.ts`):**
+1. Recompute the canonical JSON string from the received verdict minus `signature`.
+2. `recoverMessageAddress({message: canonical_json, signature})` == `signer.address` (EIP-191
+   personal_sign recovery — not raw ecrecover(digest, signature)).
 3. `signer.address` is the address bound to `signer.erc8004_id` in the on-chain registry
-   (read via OnchainOS / RPC).
+   (read via OnchainOS / RPC — `onchainos agent get-agents --agent-ids <id>` →
+   `ownerAddress`/`agentWalletAddress`).
 4. `ruleset_hash` matches a published ruleset version (so they know *which* battery ran).
 
 This is the "verifiable layer" the tweet promises. Note it's an **extra assurance on top of

@@ -10,7 +10,13 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "create-wallets": "tsx scripts/create-wallets.ts",
     "deploy-test-token": "tsx scripts/deploy-test-token.ts",
-    "test-buyer": "tsx scripts/test-buyer.ts"
+    "deploy-test-nft": "tsx scripts/deploy-test-nft.ts",
+    "test-buyer": "tsx scripts/test-buyer.ts",
+    "verify-verdict": "tsx scripts/verify-verdict.ts",
+    "probe-m2-bias": "tsx scripts/probe-m2-bias.ts",
+    "spot-check-calibration": "tsx scripts/spot-check-calibration.ts",
+    "prove-calibration-log": "tsx scripts/prove-calibration-log.ts",
+    "sandbox:build": "docker build -t vidimus-sandbox-node:latest -f sandbox/node.Dockerfile sandbox"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.110.0",

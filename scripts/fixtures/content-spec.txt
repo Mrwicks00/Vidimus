@@ -1,0 +1,7 @@
+Deliver our Q1 product changelog as a Markdown document.
+
+Requirements:
+1. The document must contain a heading titled "Breaking Changes".
+2. The document must be at least 200 words long.
+3. The document must be valid, well-formed Markdown with at least one heading.
+4. The document must include a contact email address for questions about this changelog.

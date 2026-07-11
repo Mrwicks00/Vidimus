@@ -1,0 +1,20 @@
+{
+  "content": {
+    "content": [
+      {
+        "id": "changelog",
+        "format": "markdown",
+        "content": "# Overview\n\nThis release brings a wide set of improvements across the platform, focused on reliability, performance, and general polish ahead of the next quarter. The team spent considerable effort hardening the ingestion pipeline so that malformed or unexpected input from upstream partners no longer causes cascading failures downstream. Several long-standing latency issues in the reporting subsystem have also been addressed, and average query time for the most common dashboard views has dropped substantially as a result of a new caching layer introduced this cycle.\n\nWe also revisited our onboarding flow based on feedback gathered over the last two quarters. New accounts now complete setup in roughly a third of the time it previously took, thanks to a streamlined wizard and better defaults. Documentation across the developer portal was expanded significantly, with new guides covering authentication, webhooks, and rate limiting.\n\n## Known Issues\n\nA small number of customers on the legacy billing plan may see delayed invoice generation for the first cycle after this release; a fix is already scheduled for the next patch. The mobile app's offline mode remains experimental and is not yet recommended for production workloads. We are continuing to monitor performance on very large workspaces and will follow up with further tuning if needed.\n"
+      }
+    ],
+    "content.presence": [
+      { "assetId": "changelog", "target": { "kind": "heading", "value": "Breaking Changes" } }
+    ],
+    "content.bounds": [
+      { "assetId": "changelog", "metric": "word_count", "min": 200 }
+    ],
+    "content.format": [
+      { "assetId": "changelog" }
+    ]
+  }
+}

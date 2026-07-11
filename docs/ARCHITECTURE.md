@@ -170,15 +170,38 @@ computed_from: [criterion_ids in tier 1..2],
 signature, signer_erc8004_id, ruleset_version_hash, signed_at
 ```
 
-**CalibrationLog** (append-only — the P4 asset)
+**CalibrationLog** (append-only, hash-chained — the P4 asset. Built D6.B, 2026-07-11 —
+`src/calibration/`; this replaces the conceptual sketch this section originally carried, which
+predated locators/`evidence.kind`/the content family and had a `verdict_confidence` field the
+real `Verdict` type never had)
 ```
-log_id, job_id, verdict_headline, verdict_confidence,
-later_outcome?: released|disputed|arbitration_pass|arbitration_fail,
-outcome_recorded_at
+seq, logged_at, job_id, payment_id,        # payment_id == the x402 settlement tx in this system
+verdict_digest, verdict_signature, signer, # keyed by the verdict's own EIP-191 signature
+ruleset_version, ruleset_hash, issued_at,
+headline, headline_basis,
+criteria: [ { id, method, tier, confidence, result, evidence_kind, locator } ],
+                                             # evidence.kind only, never .ref/.detail - the log
+                                             # must not retain a second, ungoverned copy of
+                                             # deliverable-derived text
+prev_hash, entry_hash                       # hash chain: entry_hash[n] folds in
+                                             # prev_hash = entry_hash[n-1]; verifyChainIntegrity
+                                             # walks the file and detects any edit/delete/reorder
 ```
-Every arbitration/dispute resolution on a job we scored writes a `later_outcome` — that is
-the free ground truth that lets us check whether "90% confident" is actually wrong ~10% of
-the time.
+Integrity is chained, not per-row-signed: each row already embeds the verdict's own signature
+(content-authenticity is inherited — forging a row requires forging that signature, same
+recovery check `scripts/verify-verdict.ts` already performs), so the chain's job is narrower
+and different — proving the *log itself* wasn't quietly edited after the fact, which a
+signature alone can't do.
+
+Reproducibility (`src/calibration/spotcheck.ts`): re-runs a logged Tier-1 criterion through the
+real production checker dispatch against a freshly re-quarantined copy of the same raw
+deliverable, bypassing M2 (the pipeline's only non-deterministic, LLM-backed step) — this is
+what substantiates "a Tier-1 confidence=1.0 result is reproducible by an independent party,"
+the calibration log's core auditability claim.
+
+A later `later_outcome` (arbitration/dispute resolution) write-path — the free ground truth
+that lets Tier-2 confidence numbers eventually be checked against reality — is not yet built;
+tracked as the next extension once Tier-2 checks exist (`docs/ROADMAP.md` D6.C+).
 
 ---
 

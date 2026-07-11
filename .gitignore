@@ -3,6 +3,9 @@ dist/
 .env
 *.log
 
+# D6.B calibration log - runtime state, not source (docs/ARCHITECTURE.md §5)
+data/
+
 # PRIVATE - never published, never in a public repo
 docs/SECURITY.md
 claude.md

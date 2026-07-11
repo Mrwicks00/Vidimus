@@ -1,0 +1,8 @@
+{
+  "name": "vidimus-sandbox-runner",
+  "private": true,
+  "dependencies": {
+    "typescript": "^5.7.2",
+    "@types/node": "^20.14.0"
+  }
+}

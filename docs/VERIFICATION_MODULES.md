@@ -34,26 +34,47 @@ Fact table to extract per claimed tx:
 
 ### The Safety dimension (differentiator — do not skip)
 A technically-correct delivery can still be poisoned. Correct amount + correct wallet is
-**Correctness**; we also assess **Safety** by subcontracting `okx-security`:
+**Correctness**; we also assess **Safety** by subcontracting `okx-agentic-wallet`'s bundled
+`security` subcommands (`token-scan` / `tx-scan` — there is no standalone `okx-security`
+skill, despite the registry's naming; see `PLATFORM.md` §1):
 - `onchain.safety` — is the delivered token a honeypot / malicious contract? Were the
   approvals set during the job dangerous?
 So a swap that delivered "512 OKB to the right wallet" is PASS on correctness but the verdict
 also carries a Safety criterion — and if the token is malicious, that criterion FAILs and the
 headline reflects it. **No other verifier concept checks that a correct delivery is also
 safe.** This is a genuine edge and it's built from an existing OKX skill (composability story
-intact — we are okx-security's *consumer*, not its competitor).
+intact — we are the `security` subcommands' *consumer*, not their competitor).
+
+**Tier note (D3/D4 decision, live-tested):** `token-scan`/`tx-scan` return a genuinely graded
+verdict (`riskLevel` CRITICAL/HIGH/MEDIUM/LOW; `action` ""/warn/block), not a plain binary
+fact — confirmed live, including a real `warn` response driven by a heuristic caution
+(`TRANSFER_TO_CONTRACT_ADDRESS`), not just doc-described. Per `VERDICT_SPEC.md` §2.1, only the
+scanner's own definitive buckets (CRITICAL/block → FAIL, LOW/safe → PASS, both confidence 1.0)
+are asserted; the graded middle (MEDIUM/HIGH/warn) is left UNVERIFIABLE rather than forced
+into an uncalibrated Tier-2 number. `onchain.safety` stays registered Tier 1 on that basis —
+see `src/modules/m3-onchain.ts` `checkSafety*`.
 
 ### How it reads the chain
-- **Default:** OnchainOS CLI skills — `okx-agentic-wallet` (tx history, contract-call reads),
-  `okx-onchain-gateway` (tx simulation/tracking), `okx-dex-token` (token metadata, holder
-  analysis), `okx-security` (safety). Read each `SKILL.md` for exact subcommands before use;
-  never guess (CLAUDE.md rule). `--format json` always.
-- **Own RPC fallback (L8):** build a direct RPC reader ONLY if the CLI is too slow,
-  rate-limited, missing a needed field, or missing a chain we must verify. Keep the reader
-  behind the same internal interface so callers don't care which backend answered.
+- **Third-party tx facts** (`tx_exists`/`transfer_check`/`owner_check`/`destination_check`):
+  **own direct `viem` RPC reader** (`src/modules/m3-onchain.ts`), not a CLI. The only installed
+  skill, `okx-agentic-wallet`, has no arbitrary-tx-hash reader — its `wallet history
+  --tx-hash` is scoped to the logged-in wallet's own order history (confirmed empirically
+  against a real, unrelated tx — see `CLAUDE_HISTORY.md` Session 3). A seller's claimed
+  deliverable tx is always third-party from our perspective, so this is a clean L8 case for
+  building our own reader, not a shortcut. `okx-onchain-gateway` / `okx-dex-token`, previously
+  named here as CLI backends, **do not exist** as installed skills — corrected.
+- **Safety** (`onchain.safety`): `okx-agentic-wallet`'s bundled `security token-scan`/
+  `tx-scan`. Read `references/security.md` / `security-cli-reference.md` for exact subcommands
+  before use; never guess (CLAUDE.md rule). The CLI (v4.2.2) has no `--format json` flag at
+  all — default stdout is already JSON; do not pass the flag, it errors.
+- **Chain coverage differs between the RPC reader and the scanner:** the scanner does not
+  cover X Layer testnet (chainId 1952, where our RPC reader and disposable test contracts
+  live) at all — confirmed live (hard `Unsupported chainId` error on both commands). X Layer
+  mainnet (196) is covered. So the Safety claim carries its **own** `chain`, independent of
+  the chain the correctness legs read from — licensed by the next bullet.
 - **Multi-chain by default:** because the CLI is multi-chain, the onchain verifier is
-  natively multi-chain on day one — verify a bridge's *source* and *destination* legs on
-  different chains in one job.
+  natively multi-chain on day one — verify a bridge's *source* and *destination* legs, or a
+  Safety scan, on a different chain than the correctness legs in one job.
 
 ### Evidence
 `evidence.kind = "tx"`, `ref` = the tx hash(es), `detail` = the extracted fact in plain
@@ -95,7 +116,7 @@ sampled, how many verified, which failed and why).
 
 ---
 
-## M3.C — CODE SANDBOX (Tier 1) — fully our own build (OKX has nothing here)
+## M3.C — CODE SANDBOX (Tier 1) — fully our own build (OKX has nothing here)  **Shipped 2026-07-11 (Session 8)**
 
 For code deliverables. **Never execute delivered code on the host.**
 
@@ -103,33 +124,180 @@ For code deliverables. **Never execute delivered code on the host.**
 - `code.compiles` — does it build in a clean, isolated environment?
 - `code.tests_pass` — do the spec's stated tests (or provided tests) pass?
 
-### Isolation requirements (hard)
-- Run in a disposable container (Docker or equivalent), **no network** by default, CPU/mem/
-  wall-clock caps, read-only mount of the code, non-root, killed and destroyed after each run.
+### Isolation primitive (live-verified, dated correction to the original brief's caution)
+The original spec for this module hedged on whether a real container would be available
+("Docker or equivalent"). **Resolved 2026-07-11: real Docker (28.2.2, daemon reachable) is
+available and was individually exercised live before any code was written** — no downgraded
+story needed. Confirmed live, one flag at a time:
+- `--network none` — an outbound connect attempt fails immediately (`EAI_AGAIN`).
+- `--user 1000:1000` — confirmed non-root inside the container.
+- `--memory=64m --memory-swap=64m` — a memory-bombing script gets hard-killed;
+  `docker inspect` confirms `OOMKilled=true, ExitCode=137`.
+- `--pids-limit=16` — a fork-bomb script hits `EAGAIN` on the 17th spawn attempt.
+- `--read-only` root filesystem + `--tmpfs /tmp` for scratch, `--cap-drop=ALL`,
+  `--security-opt=no-new-privileges` — defense in depth beyond the four above.
+
+**Operational gotcha, found live, encoded into the runner (`src/security/sandbox.ts`):**
+`docker run --rm` in the foreground, killed via an external process timeout, does **not**
+stop the container — it keeps running server-side after the CLI client dies. The runner
+always runs detached (`docker run -d`), tracks the container id, and explicitly
+`docker kill`/`docker rm -f`s it on timeout or completion — it never relies on its own
+caller's timeout reaching the container.
+
+### Toolchain scope (v1, dated deviation)
+**v1 supports Node.js only — both JavaScript and TypeScript — one sandbox image**
+(`node:20-slim` + `typescript` + `@types/node` + `tsx` baked in at **image build time**,
+via `sandbox/node.Dockerfile` / `npm run sandbox:build`). Matches CLAUDE.md L6. Other
+languages are explicitly deferred, not built on spec (per this module's own original
+scope-discipline note).
+
+**No external dependencies in v1.** The hard no-network-at-run-time requirement above means
+the sandbox can never `npm install` a delivered project's dependencies (that would need
+network, which is denied at run time by design — network is only ever used at *image build*
+time, by us, ahead of any job). Code that references an external module the sandbox doesn't
+have — surfaced as TypeScript diagnostic `TS2307` at compile time, or a `MODULE_NOT_FOUND`
+crash at test time — resolves **UNVERIFIABLE, never FAIL**: we have no fair evidence the
+code is broken, only that our v1 sandbox doesn't install dependencies. A *relative* import to
+a file the deliverer simply didn't include (their own bug, not a sandbox limitation) still
+resolves FAIL. Dependency support is deferred, explicit future work, not silently swallowed.
+
+**Live-discovered subtlety worth flagging for the next session:** Node's own `--test` runner
+doesn't always hard-crash on an unresolvable `require`/`import` — it can wrap a
+`MODULE_NOT_FOUND` load failure into a single failing TAP pseudo-test instead of a bare
+process crash. The missing-module check in `src/modules/m3-code.ts`'s `interpretTestsRun`
+therefore runs *before* trusting any parsed pass/fail summary, not only in the "no summary at
+all" branch — first discovered when a hand-built live test case briefly misclassified an
+external-dependency case as a real FAIL instead of UNVERIFIABLE.
+
+### `code.compiles` semantics
+Never executes a single line of delivered code, on either language:
+- **JS**: every delivered `.js`/`.mjs`/`.cjs` file is compiled (not run) via Node's `vm.Script`
+  — a pure syntax check. A syntax error → FAIL. `vm.Script` never resolves `require`s, so a
+  missing-module case can't arise here for JS — only via `code.tests_pass`.
+- **TS**: every delivered `.ts`/`.tsx` file is type-checked as one `ts.Program` (so cross-file
+  imports within the delivery resolve too) via the TypeScript compiler API directly — `noEmit`,
+  structured diagnostics with real error codes, no free-text CLI parsing. `TS2307` → the
+  missing-external-module UNVERIFIABLE bucket; any other diagnostic → FAIL.
+
+### `code.tests_pass` semantics
+- **JS**: `node --test <declared test files>`.
+- **TS**: `tsx --test <declared test files>` (the `tsx` CLI binary directly, not
+  `node --import tsx` — the bare-specifier `--import` form doesn't reliably resolve a
+  globally-installed loader package regardless of cwd; the CLI binary does).
+- Node's `--test` TAP summary footer (`# pass N`, `# fail N`, `# tests N`) is parsed
+  mechanically — same non-instructable-extractor posture as the CSV parser in `SECURITY.md`
+  §2.2: delivered stdout/stderr is never fed to an LLM or treated as instructions, only
+  regex-matched against a format Node itself controls.
+
+### Isolation requirements (hard) — implemented as designed
+- Disposable container, **no network** at run time, CPU/mem/wall-clock/pids caps, read-only
+  mount of the code, non-root, killed and destroyed after each run
+  (`src/security/sandbox.ts`).
 - The sandbox is also an **ingest-hardening surface**: delivered code is hostile input.
   Output captured is *data* (compile logs, test results), never fed back as instructions.
-- Language-agnostic runner: Node spawns the container; the container has the toolchain for
-  the delivered code's language. Start with the languages our first real customers deliver;
-  expand as needed (scope discipline — don't build 20 language images on spec).
+  File paths are validated twice (quarantine, then again in the runner before every write) —
+  a `../` path becomes a real filesystem write location before the container's own isolation
+  even engages, a host-safety concern distinct from prompt injection.
+
+### Result mapping (locked before coding, live-proven — see CLAUDE_HISTORY.md Session 8)
+
+| Condition | Result |
+|---|---|
+| Locator doesn't resolve / quarantine-rejected slot | UNVERIFIABLE |
+| Sandbox image missing / Docker unreachable at request time | UNVERIFIABLE |
+| `code.compiles`: syntax error (JS) / real diagnostic (TS, not `TS2307`) | **FAIL** |
+| `code.compiles`: TS `TS2307` (external module) | UNVERIFIABLE |
+| `code.tests_pass`: parsed fail count > 0, no missing-module signature | **FAIL** |
+| `code.tests_pass`: crash or wrapped failure naming an external module | UNVERIFIABLE |
+| `code.tests_pass`: crash naming the deliverer's own relative import, or any other crash | **FAIL** |
+| Container OOM-killed | **UNVERIFIABLE** (resource cap, not evidence of wrongness) |
+| Container hits the wall-clock budget, killed by the runner | **UNVERIFIABLE** (same reasoning) |
+| Clean run, 0 failures, parseable output | **PASS** |
+
+**A run killed on a resource/time cap is always UNVERIFIABLE, never FAIL** — "blocked ≠
+failed" applied literally, including for a deliberately hostile deliverable (an infinite-loop
+test that blows the wall-clock budget resolves UNVERIFIABLE, not FAIL, even though the intent
+was obviously to defeat the check — we have no fair per-criterion evidence either way).
+
+### Wire shape
+`deliverable.code`: `{ code: CodeAsset[], "code.compiles": CodeCompilesClaim[],
+"code.tests_pass": CodeTestsPassClaim[] }` — same `{method, index}` locator grammar as
+onchain/data (`VERDICT_SPEC.md` §2.2), `LocatableMethod` widened to include `CodeMethod`.
+Quarantine caps (`src/security/quarantine.ts`) reject oversized/unsafe assets and claims,
+never truncate — including rejecting the entire asset if any single file path is unsafe.
 
 ### Evidence
-`evidence.kind = "test_output"`, `ref` = captured log id, `detail` = pass/fail counts +
-first failing case. If the sandbox can't build the environment the spec implies, the
-criterion is **UNVERIFIABLE** (we couldn't test), not FAIL.
+`evidence.kind = "test_output"`, `ref` = `code:<assetId>:compiles|tests`, `detail` = pass/fail
+counts + first failing case, capped at 500 chars (verbosity control only — unlike the M3.B
+row-truncation prohibition, this cap can't hide fraud, it only trims log text).
 
 ---
 
-## M4 — CONTENT CONFORMANCE (Tier 2, plus Tier-1 countables)
+## M4 — CONTENT CONFORMANCE (Tier 2, plus Tier-1 mechanical checkers)  **Tier-1 shipped 2026-07-11 (Session 10, D6.A)**
 
 For prose/report/translation/documentation deliverables. This module straddles tiers — be
 strict about which check is which.
 
-### Tier-1 countables (still confidence 1.0)
-- `content.countable` — word count, section count, "must contain N code examples", required
-  headings present, language is the requested language, file parses/opens. These are
-  mechanical: count them, don't judge them.
+### Tier-1 mechanical checkers (confidence 1.0 — D6.A, `src/modules/m3-content.ts`)
 
-### Tier-2 grounded judgments (calibrated confidence, evidence-anchored)
+Four discrete methods, one per mechanical fact — same one-method-per-fact pattern as
+M3.A/B/C, replacing the earlier single `content.countable` stub. Same claim-addressing
+grammar as M3.A/B/C (`VERDICT_SPEC.md` §2.2): a criterion's `locator` points at
+`deliverable.content[method][index]`.
+
+**Wire shape** (`deliverable.content`): `{ content: ContentAsset[], "content.presence":
+ContentPresenceClaim[], "content.format": ContentFormatClaim[], "content.bounds":
+ContentBoundsClaim[], "content.pattern": ContentPatternClaim[] }`, where `ContentAsset =
+{ id, format: "text"|"markdown"|"json"|"csv", content }`. Pass-1 extraction
+(`src/security/quarantine.ts`'s `extractContentAsset`) converts each raw asset into a
+`ContentFactSet` once at quarantine time (word/char/line/section counts, heading list, JSON
+parse result, CSV header parse result) — the checkers only ever read this, never re-parse raw
+bytes a different way (mirrors `m3-data.ts`'s `DataFactSet` boundary).
+
+- `content.presence` — `{ assetId, target: { kind: "heading"|"json_key"|"csv_column"|
+  "literal", value } }`. Resolves the target against the asset's own declared `format`
+  (heading→markdown, json_key→json with dot-path object traversal (no array indices in v1),
+  csv_column→csv header, literal→any format, raw substring search). Found → PASS; genuinely
+  absent (structure parsed fine, target just isn't there) → **FAIL** with mechanical evidence
+  of absence; target kind incompatible with the asset's declared format, or the asset doesn't
+  parse as needed to resolve the target → **UNVERIFIABLE**.
+- `content.format` — `{ assetId }` (no extra field — re-validates the asset's *own*
+  self-declared `format`, mirrors `data.schema`'s "declared vs actual" spirit). json→
+  `JSON.parse` succeeds; csv→header row present with no duplicate columns; markdown→≥1
+  heading line found; text→trivially PASS (nothing structural to validate). Mismatch → FAIL.
+- `content.bounds` — `{ assetId, metric: "word_count"|"char_count"|"line_count"|
+  "section_count", min?, max? }` (at least one of min/max required, enforced at quarantine).
+  In range → PASS; out of range → **FAIL**, evidence quantifies the exact shortfall/overage.
+  Deliberately binary (not PARTIAL) to match the shipped `data.rowcount` precedent for the
+  same "count vs threshold" shape — keeps a wildly-unmet EXPLICIT bound able to sink the
+  headline to FAIL like any other broken EXPLICIT requirement (design gate, 2026-07-11).
+- `content.pattern` — `{ assetId, pattern: "email"|"url"|"iso_date"|"semver" }`. Matches
+  against a small **vetted pattern registry we own** (`CONTENT_PATTERNS` in
+  `m3-content.ts`), deliberately **not** a caller-supplied regex string — the deliverable is
+  hostile input by this project's own posture, and a claim-controlled regex compiled and run
+  against claim-controlled content is a textbook ReDoS vector with no existing sandboxing/
+  timeout infra to mitigate it. Every vetted pattern is hand-checked linear-time-safe (no
+  nested quantifiers, no ambiguous overlapping alternation). Match → PASS; no match → FAIL;
+  missing asset → UNVERIFIABLE.
+
+All four: missing/quarantine-rejected asset → UNVERIFIABLE; locator doesn't resolve (no claim
+submitted, index out of range, rejected slot) → UNVERIFIABLE, never FAIL, per the D4.5
+resolution contract extended to this fourth locatable family. `evidence.kind = "extract"`
+throughout.
+
+**The hard line (design gate, 2026-07-11):** every Tier-1 content checker is purely
+mechanical — exact string/regex/structural match against a declared, quarantined claim.
+None of them ever read the criterion's free-text `text` field or reason about what a
+document "seems" to satisfy. A criterion that would require meaning, quality, tone,
+correctness, or topicality judgment is never assigned a Tier-1 content method at all (M2
+leaves `method: null` if nothing mechanical fits, per `VERDICT_SPEC.md` §6 rule 4) — it is
+never smuggled into one of these four checkers as a best-effort guess. Live-proven: a
+document that **genuinely contains** a required heading, but whose deliverable never submits
+the matching `content.presence` claim, resolves UNVERIFIABLE, not PASS — the checker never
+freelance-searches the raw asset for what "seems" satisfied, it only resolves the declared
+claim (`src/modules/m3-content.test.ts`'s adversarial case).
+
+### Tier-2 grounded judgments (calibrated confidence, evidence-anchored — not yet built, D6.B+)
 - `content.coverage` — does it actually address each required topic/point from the spec?
   Evidence = the passage that covers each point (or its absence).
 - `content.source_grounding` — do cited sources exist and support the claims that cite them?

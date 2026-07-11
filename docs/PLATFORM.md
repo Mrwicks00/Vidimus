@@ -33,12 +33,21 @@ npx skills add okx/onchainos-skills
    is where U1 (listing schema, CLOSED §7) and the A2A/A2MCP job lifecycle live. Read closely.
 3. `okx-agent-payments-protocol` — the payment dispatcher: x402 / MPP / a2a-pay, the 402
    flow, paymentId, signing. This is M1's contract. Where U2 (response envelope) is resolved.
-4. `okx-security` — token risk / tx pre-execution safety / signature+approval checks. This is
-   the Safety dimension we subcontract in M3.A.
+4. `okx-agentic-wallet` — bundles wallet/gateway/portfolio/token **and** `security`
+   (`token-scan`/`tx-scan`/`dapp-scan`/`sig-scan`/`approvals`) under one skill. There is no
+   standalone `okx-security` skill, despite the registry's naming — the security subcommands
+   are reached via this skill's Intent Routing table (`references/security.md` /
+   `security-cli-reference.md`). This is the Safety dimension we subcontract in M3.A.
 
-Also worth reading when M3 onchain work starts: `okx-agentic-wallet` (tx history,
-contract-call reads), `okx-onchain-gateway` (simulation/tracking), `okx-dex-token` (token
-metadata, holder analysis). Read each `SKILL.md`'s Command Index for exact subcommands.
+**Correction (Session 3/4 finding, was wrong in earlier drafts):** `okx-onchain-gateway` and
+`okx-dex-token` **do not exist** as installed skills — only `okx-agentic-wallet` is installed,
+and it does not expose an arbitrary third-party tx-hash reader (`wallet history --tx-hash` is
+scoped to the logged-in wallet's own order history, confirmed empirically against a real,
+unrelated tx). So M3.A's onchain fact checks (`tx_exists`/`transfer_check`/`owner_check`/
+`destination_check`) read a **third-party** tx — always the seller's, never ours — via our own
+direct `viem` RPC reader (`src/modules/m3-onchain.ts`), not a CLI. Only the Safety leg
+(`onchain.safety`) goes through OKX infra, via `okx-agentic-wallet`'s bundled `security`
+subcommands. Read that skill's `SKILL.md`'s Intent Routing table for exact subcommands.
 
 ---
 
@@ -70,25 +79,51 @@ metadata, holder analysis). Read each `SKILL.md`'s Command Index for exact subco
   challenge/credential/paymentId fields — **U2**.
 - Keys: signing/settlement via the **TEE-secured Agentic Wallet**. Never export keys into app
   code, env dumps, or logs (SECURITY.md T4).
+- **Verdict signing (M7, D4)**: the concrete mechanism is `onchainos wallet sign-message --chain
+  196 --from <erc8004Address> --type personal --message <canonical_verdict_json>` — an EIP-191
+  personal_sign, the only signing primitive the TEE-secured wallet exposes (no raw-digest
+  ECDSA, no key export). See `docs/VERDICT_SPEC.md` §5 for the full canonicalization/verify
+  scheme and the dated correction explaining why (`src/verdict/sign.ts`).
 
 ---
 
 ## 4. PRICING TIERS (L2)
 
-Base is **0.01 USDT**. The ratio rule: our fee must be a tiny fraction of the deliverable's
-value, and any tier that triggers **paid** subcontracted OKX calls must be priced **above** our
-cost for those calls (never let a 0.01 job trigger unbounded paid lookups — SECURITY/modules).
+**Decided 2026-07-11: flat pricing, no tiers.** Every job — regardless of what kind of
+verification it triggers (onchain, data, code, content) — is charged a single flat price,
+**0.1 USDT**. This matches the actual implementation (`config.ts` `priceAtomic`, one value, no
+tier-differentiated billing) and replaces the originally-planned Base/Chain/Chain+Safety/Deep
+tier table below, kept here for the reasoning trail rather than as a live pricing model.
+
+**Why flat instead of tiered:** every job pays the M2 criteria-compiler's Opus cost
+(`compileCriteria()` in `m2-criteria-compiler.ts`, `claude-opus-4-8` at `effort: "high"` with
+adaptive thinking, one call per job) regardless of tier — it's a fixed cost, not something that
+scales with the tier. A cheap Base price (0.01-0.02 USDT) left little to no margin over that
+fixed cost alone (estimated ~$0.02-0.06/call, not yet measured live - see action item below), so
+a differentiated table where the cheapest tier is priced closest to a cost every tier shares was
+the wrong shape. Flat 0.1 USDT clears the estimated M2 cost with real margin on every job.
+
+The original tiered design existed to guard against **unbounded paid lookups** (a cheap job
+triggering expensive supplier calls) - re-checked before going flat, that risk is now largely
+capped at the code level, not just priced around: `data.sample_verify` caps at 20,000 rows /
+~5MB per dataset; `code.*` caps at 5 assets / 2MB total with a 15s sandbox wall-clock budget
+(both from D5, `SECURITY.md` §2.1). **One unresolved gap:** the actual cost of the
+`okx-agentic-wallet security token-scan`/`tx-scan` subcontract (Chain+Safety's cost driver in
+the old table) hasn't been verified against the flat 0.1 USDT price - confirm it fits before
+relying on this being safe in all cases.
+
+**Old tier table (superseded, kept for context):**
 
 | Tier | What it covers | Indicative price | Cost driver |
 |------|----------------|------------------|-------------|
-| Base | Conformance: criteria compilation, schema/countables, file validity, content Tier-1 | **0.01 USDT** | pure compute |
-| Chain | Base + onchain fact verification (tx/transfer/owner/destination) | above supplier cost (RPC/CLI calls) | OnchainOS reads |
-| Chain+Safety | Chain + `okx-security` token/approval safety dimension | above chain tier | paid okx-security subcontract |
-| Deep/Batch | Sampled data audits, sandboxed code execution, large deliverables | scaled by work | sandbox + sampling compute |
+| Base | Conformance: criteria compilation, schema/countables, file validity, content Tier-1 | ~~0.01 USDT~~ | pure compute |
+| Chain | Base + onchain fact verification (tx/transfer/owner/destination) | ~~above supplier cost~~ | OnchainOS reads |
+| Chain+Safety | Chain + `okx-agentic-wallet security` token/tx safety dimension | ~~above chain tier~~ | paid okx-agentic-wallet security subcontract |
+| Deep/Batch | Sampled data audits, sandboxed code execution, large deliverables | ~~scaled by work~~ | sandbox + sampling compute |
 
-Pricing feeds Revenue Rocket (volume × price) — keep base low for sold-count, price the
-expensive tiers to stay margin-positive. Confirm exact tier fields against the listing schema
-(**U1**) before hard-coding.
+**Action before D7:** run one real `compileCriteria` call with `response.usage` logged to
+confirm the ~$0.02-0.06 M2 cost estimate against 0.1 USDT margin, and confirm the OKX security
+subcontract's real cost fits under the same flat price.
 
 ---
 
@@ -106,11 +141,13 @@ expensive tiers to stay margin-positive. Confirm exact tier fields against the l
 
 ## 6. CONSUME vs BUILD (L8, quick reference)
 
-- **Consume:** x402/APP payment, ERC-8004 registration, `okx-agentic-wallet` /
-  `okx-onchain-gateway` / `okx-dex-token` reads, `okx-security` safety.
-- **Build our own only if their tool limits us:** direct RPC readers (speed/coverage), the code
-  sandbox (they have none), the calibration DB/indexer.
-- We are `okx-security`'s **consumer**, never its competitor — keep that framing in code/README.
+- **Consume:** x402/APP payment, ERC-8004 registration, `okx-agentic-wallet`'s bundled
+  `security token-scan`/`tx-scan` for the Safety dimension.
+- **Build our own only if their tool limits us:** direct RPC readers for third-party tx facts
+  (the CLI has no general chain reader — see §1), the code sandbox (they have none), the
+  calibration DB/indexer.
+- We are `okx-agentic-wallet`'s `security` subcommands' **consumer**, never a competitor to
+  it — keep that framing in code/README. (There is no standalone `okx-security` skill to name.)
 
 ---
 

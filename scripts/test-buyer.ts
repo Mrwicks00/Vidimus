@@ -36,6 +36,9 @@ Requirements:
 const specPath = process.argv[3];
 const spec = specPath ? readFileSync(specPath, "utf8") : DEFAULT_SPEC;
 
+const deliverablePath = process.argv[4];
+const deliverable = deliverablePath ? JSON.parse(readFileSync(deliverablePath, "utf8")) : undefined;
+
 const rpcUrl = required("RPC_URL");
 const chainId = Number(process.env.CHAIN_ID ?? 1952);
 const buyerKey = required("TEST_BUYER_PRIVATE_KEY") as `0x${string}`;
@@ -122,7 +125,7 @@ async function main() {
   const second = await fetch(targetUrl, {
     method: "POST",
     headers: { "PAYMENT-SIGNATURE": encodedHeader, "content-type": "application/json" },
-    body: JSON.stringify({ spec }),
+    body: JSON.stringify(deliverable ? { spec, deliverable } : { spec }),
   });
 
   const body = await second.text();
