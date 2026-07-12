@@ -8,7 +8,7 @@ export function buildPaymentRequirements(resourceUrl: string): PaymentRequiremen
     resource: {
       method: "POST",
       url: resourceUrl,
-      description: "Vidimus base-tier conformance verdict (D2: real criteria compiler, checkers not yet wired)",
+      description: "Vidimus conformance verdict - signed, evidence-backed verification against onchain, dataset, code, and content deliverables",
     },
     accepts: [
       {
