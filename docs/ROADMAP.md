@@ -416,11 +416,34 @@ evidence and a correct taste refusal.
   review overlaps, not blocks (PLATFORM §5).
 - Run live verifications against 3+ real agents across kinds (onchain: #2171; data: #2023; plus
   one content/other). Each is a real paid call **and** demo capture.
+  - **✅ Met 2026-07-12, real third-party agents, real mainnet money** - deliberately not
+    #2171/#2023 (developer's explicit choice, to prove this generalizes rather than re-running
+    the two agents already named in this doc). Found via `onchainos agent search`, paid via
+    `onchainos payment pay` (TEE-signed from agent 4933's own mainnet wallet, funded with real
+    OKB + USD₮0 for this purpose - $1.99 total, ~$0.013 spent across all three, real gas paid
+    by each recipient's facilitator, not us). All three landed in Vidimus's `content` kind
+    (each real agent returns a JSON API response, not a literal onchain action or a downloadable
+    dataset file) - genuinely 3 different real third-party services/deliverables, not the
+    literal onchain_action/dataset/content taxonomy split the original bullet envisioned; noted
+    honestly rather than overclaimed. Each produced a correct PASS/PASS/UNVERIFIABLE pattern
+    (mechanical checks pass, the INFERRED semantic-relevance criterion correctly left
+    UNVERIFIABLE - no Tier-2 grounding checker exists yet, D6.C), headline PARTIAL, signed and
+    on-chain confirmed:
+    - **Factor Credit Desk** (#4502, onchain-reputation JSON report) - job
+      `vd_01KXBARG3KW16P8JDJH077YTHX`, our settlement tx
+      `0x1590b3b168a617db63f14541d484da3831997a54b5d5b57ad52c9c0f537276b9`.
+    - **CoinAnk OpenAPI** (#2013, live Bitcoin ETF market data) - job
+      `vd_01KXBB1DAY74H7JA7BRHHW393S`, our settlement tx
+      `0x2a5f15538573c93f59506bcf0d999f9f0f9b8638f43f91dd6197934d52a4c3b5`.
+    - **Newsliquid** (#2135, news category/source taxonomy) - job confirmed on-chain block
+      35407120, same pattern.
+  - Not yet done: demo footage capture (screen recording) of these three - the calls themselves
+    are proven and reproducible, capturing them on camera is still open.
 - Capture the money shot: catch a real failure/fraud on camera (wrong destination, fake rows,
   malicious token) → the winning clip.
 
-**DONE-WHEN:** listing submitted (review pending is fine); ≥3 live verifications recorded with
-evidence; demo footage captured.
+**DONE-WHEN:** listing submitted (review pending is fine) ✅; ≥3 live verifications recorded
+with evidence ✅ (see above); demo footage captured 🔲.
 
 ---
 
