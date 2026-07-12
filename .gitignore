@@ -3,6 +3,10 @@ dist/
 .env
 *.log
 
+# onchainos session/credential material staged locally before uploading to
+# Render Secret Files - never belongs in the repo (see scripts/render-start.sh)
+onchainos-*.b64
+
 # D6.B calibration log - runtime state, not source (docs/ARCHITECTURE.md §5)
 data/
 
