@@ -334,8 +334,57 @@ evidence and a correct taste refusal.
 
 ---
 
-## D7 — LISTING + LIVE DEMO RUNS  🔲
+## D7 — LISTING + LIVE DEMO RUNS  🟡
 **Scope:** M8. Go live; generate real footage.
+- **Permanent hosting + listing submitted (2026-07-12).** Deployed to Render
+  (`https://vidimus.onrender.com`, Node web service, `npm install && npm run build` /
+  `npm start`) - the D1 blocker note ("don't activate until a permanent host exists") is now
+  resolved. Fixed a stale `resource.description` in the 402 challenge left over from the D1/D2
+  skeleton ("checkers not yet wired") that was still live in production. Repointed agent
+  4933's A2MCP service to the Render endpoint via `onchainos agent update` (a stale D1
+  service pointing at a dead `trycloudflare.com` tunnel was discovered - not the "empty
+  serviceList" `agent get-agents` misleadingly showed; the dedicated `agent service-list`
+  command is the authoritative read) - cleaned up two rounds of accidental duplicate services
+  along the way (`operation:create` isn't idempotent; re-running it, including once from a
+  second machine, creates a new entry each time) before landing on exactly one correct
+  service. `agent activate` submitted 2026-07-12: **"Listing under review"**
+  (`approvalRemark: "AI quality review suggested pass"`), ~24h review per PLATFORM §5; the
+  endpoint is already publicly callable by agent id pre-approval.
+- **Production signing gap found and fixed (2026-07-12) - the real work of this slice.**
+  `signVerdict()` (`src/verdict/sign.ts`) shells out to `onchainos wallet sign-message` -
+  first production paid round-trip **settled a real payment** (tx
+  `0x005ae301a1391c13a14bcfa7aef48f73ed9ec93902c57497ff4ceec182e22a6c`) **then 500'd**,
+  because Render's container has neither the `onchainos` binary nor an authenticated wallet
+  session. Root-caused before any fix (money-moved-for-nothing is exactly the failure mode
+  L9/M7 exists to prevent): the officially-documented headless path is OKX API-Key auth
+  (`OKX_API_KEY`/`OKX_SECRET_KEY`/`OKX_PASSPHRASE`, silent `onchainos wallet login`) - but
+  every API key generated via the dev portal's "Connect Wallet" screen resolved to a
+  *different* OKX account than the one owning agent 4933 (confirmed via the CLI's own
+  built-in mismatch guard - `wallet login` warns and refuses to switch without `--force`, so
+  no session was ever corrupted while diagnosing this). Root cause, confirmed against the
+  live OKX dev-docs (not guessed): "Click Connect Wallet to **create or log in** to an
+  account" - connecting a wallet not already linked to the email-based Agentic Wallet
+  provisions a *new* dev-portal identity rather than authenticating the existing one; the
+  Agentic Wallet (TEE-managed, no externally-held key) structurally has no wallet to connect
+  with that screen at all. **Fix, shipped instead:** the `onchainos` binary committed directly
+  into the repo (`bin/onchainos` - a public tool, not a secret, verified working since it's
+  the exact binary used for every `onchainos` command this whole project) plus a Render start
+  script (`scripts/render-start.sh`) that restores an already-authenticated session
+  (`session.json`/`keyring.enc`/`machine-identity`/`wallets.json`) from Render's **Secret
+  Files** (base64-encoded, never committed - staged locally then deleted, `.gitignore`d
+  against recurrence) into `$HOME/.onchainos` before the server starts. Verified this crosses
+  machines, not just paths: the identical session that authenticates in this dev sandbox and
+  on the developer's own machine also authenticated cleanly inside Render's container (deploy
+  log: `loggedIn: true`, matching `accountId`) - re-ran the exact production paid round-trip
+  after the fix and got a **real signature** back this time
+  (tx `0xebc47e9f3cf306aa0e920ebd2995997ca0b197f99e6ffe29e39ac5d1b11cd4ec`), confirmed via
+  `scripts/verify-verdict.ts`: recovered signer matches `signer.address`, and `signer.address`
+  matches the live on-chain ERC-8004 owner of agent id 4933. This is now the standing answer
+  for "how does a deployed Vidimus instance sign," not a one-off workaround - worth folding
+  into `PLATFORM.md`/`SECURITY.md` at the next docs pass (not done this session - scope was
+  proving the round-trip, not writing it up permanently).
+- Still open before D7 can close: the pricing decision below, ≥3 live verifications across
+  kinds, and demo footage.
 - Confirm pricing against the real U1 schema (PLATFORM §4): **decided 2026-07-11 - flat 0.1
   USDT per job, no tiers**, replacing the originally-planned Base/Chain/Chain+Safety/Deep table.
   Before going live, still confirm: (1) the M2 `compileCriteria()` Opus cost - **measured
@@ -397,7 +446,7 @@ evidence; demo footage captured.
 | D6.A | content Tier-1 | mechanical content checks, PASS/FAIL/UNVERIFIABLE mix, live-proven |
 | D6.B | calibration log | append-only, hash-chained, real verdict logged + spot-check reproduced |
 | D6.C | content Tier-2 | tiered content w/ taste refusal |
-| D7 | listing + demos | listed + ≥3 live runs + footage |
+| D7 | listing + demos | hosted + listing submitted + prod signing proven; ≥3 live runs + footage still open |
 | D8 | buffer + submit | live + submitted + posted |
 
 ---
