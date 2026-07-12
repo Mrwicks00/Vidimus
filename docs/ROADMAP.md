@@ -437,8 +437,34 @@ evidence and a correct taste refusal.
       `0x2a5f15538573c93f59506bcf0d999f9f0f9b8638f43f91dd6197934d52a4c3b5`.
     - **Newsliquid** (#2135, news category/source taxonomy) - job confirmed on-chain block
       35407120, same pattern.
-  - Not yet done: demo footage capture (screen recording) of these three - the calls themselves
-    are proven and reproducible, capturing them on camera is still open.
+  - **Second round, same session, at the developer's request** ("don't only test simple stuff")
+    - **Barker Yield Agent** (#2012, real-time DeFi yield index across 500+ protocols) - real
+      USDC/Arbitrum pool data (dForce, Goat Protocol, Peapods, AUTOfinance, real APYs/TVL),
+      verified 3 PASS / 1 UNVERIFIABLE, PARTIAL headline, on-chain block 35413618.
+    - **Otto AI (#2118) - a genuine on-chain action, not just a data pull.** Provisioned a
+      real Otto X sub-wallet (`0x54dab2b1c4c34d9d71eab8d14509bb53b7fa39d2`, bound to agent
+      4933's payer identity), funded it with a real 0.2 USDT0 transfer
+      (`0xab3e4df88f81170a1c37ea965724c12d8a56142e58beb58fd004e0ad926dc431`, confirmed 435
+      blocks deep), then paid Otto's `/auto-swap` to execute a **real swap**, 0.05 USDT0 →
+      WOKB, via the OKX DEX aggregator - real settlement tx
+      `0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697`. Two failed attempts
+      first (a missing `chain` field, then a transient OKX DEX 502) - confirmed neither charged
+      the $0.05 fee before finding the working request shape, so no money was lost to trial and
+      error.
+    - **Finding, not a bug: fed this real swap tx back into our own production `/verify` and
+      it correctly came back UNVERIFIABLE**, not a fabricated PASS - evidence: `"tx ...
+      not found on chain or chain unreachable"`. Root cause: Vidimus's onchain checker
+      (`src/modules/m3-onchain.ts`) reads from `RPC_URL`, still configured for X Layer
+      **testnet** (1952); the swap is on **mainnet** (196). This is concrete, live proof of
+      the mainnet-migration gap already flagged in this same D7 section (pricing paragraph
+      above never covered it explicitly; surfaced here by trying to verify a real mainnet
+      action and watching it correctly refuse to guess) - **the onchain module is verified
+      correct in its refusal to fabricate a result, but cannot yet demonstrate a real PASS
+      until Render's `CHAIN_ID`/`RPC_URL`/`PAYMENT_TOKEN_ADDRESS` point at mainnet.** Not done
+      this session - flagging as the concrete next step to actually see the onchain module's
+      real teeth (destination/safety checks) fire in production.
+  - Not yet done: demo footage capture (screen recording) of any of these - the calls
+    themselves are proven and reproducible, capturing them on camera is still open.
 - Capture the money shot: catch a real failure/fraud on camera (wrong destination, fake rows,
   malicious token) → the winning clip.
 
