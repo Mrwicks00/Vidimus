@@ -1,0 +1,152 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/bitter";
+@import "@fontsource-variable/public-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+
+/*
+  VIDIMUS design tokens — "evidence dossier" system.
+  Vidimus is a notarized, forensic witness for machine-to-machine commerce: it opens a case
+  file on every job, quarantines the evidence, tags each fact EXHIBIT/EXPLICIT-INFERRED, and
+  stamps a signed verdict. The palette and type below are drawn from that world (ledger ink,
+  manila case folders, wax seals, typewritten registries) rather than a generic crypto or SaaS
+  default. One committed look, no light/dark toggle — this is a single deliberate register.
+*/
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: 'Public Sans Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-heading: 'Bitter Variable', Georgia, serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-paper: var(--paper);
+  --color-paper-dim: var(--paper-dim);
+  --color-rule: var(--rule);
+
+  --color-verify: var(--verify);
+  --color-verify-dim: var(--verify-dim);
+  --color-seal: var(--seal);
+  --color-seal-dim: var(--seal-dim);
+  --color-copper: var(--copper);
+  --color-copper-dim: var(--copper-dim);
+  --color-slate: var(--slate);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) * 0.5);
+  --radius-md: calc(var(--radius) * 0.75);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.5);
+}
+
+:root {
+  /* Ledger ink — near-black with a faint warm-green cast, never neutral/pure black. */
+  --ink: #0b0e0c;
+  --ink-soft: #12160f;
+  /* Dossier paper — manila/aged-page off-white, used sparingly for "physical" surfaces. */
+  --paper: #f2eee2;
+  --paper-dim: #e7e1d0;
+  --rule: rgba(242, 238, 226, 0.12);
+
+  /* Status ink — the four verdict colors. Deliberately not neon, not yellow. */
+  --verify: #3fae82;       /* PASS — verification-stamp green */
+  --verify-dim: #1f7a5c;
+  --seal: #d1603c;         /* FAIL — sealing-wax red/rust */
+  --seal-dim: #b34324;
+  --copper: #c98a4b;       /* PARTIAL — burnt copper, explicitly not amber/yellow */
+  --copper-dim: #a06b34;
+  --slate: #8b9088;        /* UNVERIFIABLE — neutral evidence-gray */
+
+  --background: var(--ink);
+  --foreground: var(--paper);
+  --card: var(--ink-soft);
+  --card-foreground: var(--paper);
+  --popover: var(--ink-soft);
+  --popover-foreground: var(--paper);
+  --primary: var(--verify);
+  --primary-foreground: #06120d;
+  --secondary: rgba(242, 238, 226, 0.06);
+  --secondary-foreground: var(--paper);
+  --muted: rgba(242, 238, 226, 0.05);
+  --muted-foreground: #a7a595;
+  --accent: rgba(63, 174, 130, 0.14);
+  --accent-foreground: var(--verify);
+  --destructive: var(--seal);
+  --destructive-foreground: #1a0d08;
+  --border: var(--rule);
+  --input: rgba(242, 238, 226, 0.14);
+  --ring: var(--verify-dim);
+  --radius: 0.4rem;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "liga" 1, "kern" 1;
+  }
+  ::selection {
+    background: var(--verify-dim);
+    color: var(--paper);
+  }
+}
+
+@layer utilities {
+  .font-heading {
+    font-family: var(--font-heading);
+  }
+  .font-mono-data {
+    font-family: var(--font-mono);
+    font-feature-settings: "tnum" 1, "zero" 1;
+  }
+  /* Faint fibrous grain, evokes scanned paper without a texture image asset. */
+  .grain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    background-image: radial-gradient(rgba(242, 238, 226, 0.045) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -24,4 +24,11 @@ export const config = {
   // D6.B calibration log (docs/ARCHITECTURE.md §5) - append-only JSONL, not committed to git
   // (runtime state, not source - see .gitignore).
   calibrationLogPath: process.env.CALIBRATION_LOG_PATH ?? "data/calibration-log.jsonl",
+  // Frontend "run a live verification" button (src/routes/demo.ts) - optional. A funded
+  // demo-buyer wallet that pays real 0.1 USD₮0 per click. Absent in a deployment => the demo
+  // route answers 503 and the frontend falls back to the static track record; the rest of the
+  // service is unaffected either way.
+  demoBuyerPrivateKey: (process.env.DEMO_BUYER_PRIVATE_KEY || "") as `0x${string}` | "",
+  demoCooldownSeconds: Number(process.env.DEMO_COOLDOWN_SECONDS ?? 180),
+  demoDailyLimit: Number(process.env.DEMO_DAILY_LIMIT ?? 15),
 };
