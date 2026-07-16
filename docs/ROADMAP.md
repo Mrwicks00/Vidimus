@@ -493,6 +493,14 @@ evidence and a correct taste refusal.
       `0x2a5f15538573c93f59506bcf0d999f9f0f9b8638f43f91dd6197934d52a4c3b5`.
     - **Newsliquid** (#2135, news category/source taxonomy) - job confirmed on-chain block
       35407120, same pattern.
+    - **⚠️ Correction, 2026-07-16**: the two settlement tx hashes above (Factor Credit Desk,
+      CoinAnk) were re-checked directly against X Layer mainnet via `eth_getTransactionByHash`
+      and neither exists on-chain. No calibration-log entry or other raw record for either job
+      was found to recover the real hash. Left in place above (not deleted) so this log stays an
+      honest append-only trail, but both cases are removed from the public track record
+      (README.md, web/src/components/TrackRecord.tsx) until real evidence can be re-captured.
+      The Newsliquid block claim in the same bullet was independently re-checked and confirmed
+      real.
   - **Second round, same session, at the developer's request** ("don't only test simple stuff")
     - **Barker Yield Agent** (#2012, real-time DeFi yield index across 500+ protocols) - real
       USDC/Arbitrum pool data (dForce, Goat Protocol, Peapods, AUTOfinance, real APYs/TVL),

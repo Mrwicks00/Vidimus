@@ -36,26 +36,6 @@ const CASES: Case[] = [
     evidenceLabel: "confirmed block",
     txHash: undefined,
   },
-  {
-    agent: "Factor Credit Desk",
-    agentId: "#4502",
-    what: "Onchain-reputation JSON report",
-    headline: "Partial",
-    variant: "copper",
-    note: "Mechanical structure checks PASS. The semantic-relevance criterion is honestly UNVERIFIABLE — no Tier-2 grounding checker exists yet.",
-    evidenceLabel: "settlement tx",
-    txHash: "0x1590b3b168a617db63f14541d484da3831997a54b5d5b57ad52c9c0f537276b9",
-  },
-  {
-    agent: "CoinAnk OpenAPI",
-    agentId: "#2013",
-    what: "Live Bitcoin ETF market data",
-    headline: "Partial",
-    variant: "copper",
-    note: "Same honest pattern: mechanical checks pass, the judgment call is refused rather than guessed.",
-    evidenceLabel: "settlement tx",
-    txHash: "0x2a5f15538573c93f59506bcf0d999f9f0f9b8638f43f91dd6197934d52a4c3b5",
-  },
 ];
 
 function truncateHash(hash: string) {

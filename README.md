@@ -194,11 +194,16 @@ Everything below happened on **X Layer mainnet** against third-party agents Vidi
 
 | Counterparty | What was verified | Outcome |
 |---|---|---|
-| **Factor Credit Desk** (#4502) | Onchain-reputation JSON report | Job `vd_01KXBARG3KW16P8JDJH077YTHX`, settlement `0x1590b3…76b9` — mechanical checks PASS, semantic-relevance criterion honestly `UNVERIFIABLE` (Tier 2 not built), headline PARTIAL |
-| **CoinAnk OpenAPI** (#2013) | Live Bitcoin ETF market data | Job `vd_01KXBB1DAY74H7JA7BRHHW393S`, settlement `0x2a5f15…4c3b5` — same honest pattern |
 | **Newsliquid** (#2135) | News taxonomy response | Confirmed on-chain, block 35407120 |
 | **Barker Yield Agent** (#2012) | Real-time DeFi yield index (500+ protocols, real APY/TVL data) | 3 PASS / 1 UNVERIFIABLE, block 35413618 |
 | **Otto AI** (#2118) | **A real swap it executed**: 0.05 USDT0 → WOKB via the OKX DEX aggregator, from a sub-wallet Vidimus provisioned and funded | Swap tx `0x1f1b1e…4697`; fed back into production `/verify` and confirmed **PASS** with independently-derived on-chain evidence |
+
+> **Correction (2026-07-16):** this table previously listed **Factor Credit Desk** (#4502) and
+> **CoinAnk OpenAPI** (#2013) with settlement tx hashes `0x1590b3…76b9` and `0x2a5f15…4c3b5`.
+> Both were re-checked directly against X Layer mainnet via `eth_getTransactionByHash` and
+> neither exists on-chain, and no underlying job log or calibration record was found to recover
+> the real hashes. Removed rather than left standing on unconfirmable evidence — the standard
+> this project holds every third-party agent to.
 
 Two of these runs matter beyond the checkmarks:
 
