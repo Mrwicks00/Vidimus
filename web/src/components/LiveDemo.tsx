@@ -8,6 +8,18 @@ import { Stamp, type StampVariant } from "@/components/Stamp";
 import { SITE } from "@/lib/site";
 import type { Criterion, DemoStatus, Settlement, Verdict, VerdictResult } from "@/lib/verdict";
 
+const DEMO_CASE_PREVIEW: Record<string, string> = {
+  otto: `Verify a token swap executed on X Layer mainnet by a third-party
+agent (Otto AI):
+- tx 0x1f1b1e4e…e046697 must exist and be confirmed on mainnet.
+- it must move >= 0.05 USDT0 (0x779ded0c…713736).`,
+  idleflow: `Verify a real stablecoin deposit executed by IdleFlow (#4523) on
+X Layer mainnet via its non-custodial Yield Allocation service:
+- approve tx 0xe8ef44af…a59c44 and supply tx 0xb753092…4fb3d03 must
+  exist and be confirmed, moving >= 0.2 USDT to the Aave V3 reserve.
+- its "highest-APY vetted market" claim is checked against real data.`,
+};
+
 const HEADLINE_VARIANT: Record<VerdictResult, StampVariant> = {
   PASS: "verify",
   FAIL: "seal",
@@ -22,11 +34,6 @@ const PROCESS_LOG = [
   "Compiling criteria and checking on-chain evidence…",
   "Signing the verdict…",
 ];
-
-const DEMO_SPEC_PREVIEW = `Verify a token swap executed on X Layer mainnet by a third-party
-agent (Otto AI):
-- tx 0x1f1b1e4e…e046697 must exist and be confirmed on mainnet.
-- it must move >= 0.05 USDT0 (0x779ded0c…713736).`;
 
 function resultColor(result: VerdictResult): string {
   if (result === "PASS") return "text-verify";
@@ -45,11 +52,15 @@ export function LiveDemo() {
   const [error, setError] = useState<string | null>(null);
   const [retryAfter, setRetryAfter] = useState<number>(0);
   const [stampKey, setStampKey] = useState(0);
+  const [selectedCase, setSelectedCase] = useState<string>("otto");
 
   useEffect(() => {
     fetch("/demo/status")
       .then((r) => r.json())
-      .then((s: DemoStatus) => setStatus(s))
+      .then((s: DemoStatus) => {
+        setStatus(s);
+        if (s.defaultCase) setSelectedCase(s.defaultCase);
+      })
       .catch(() => setStatus({ enabled: false, cooldownRemainingSeconds: 0, dailyRemaining: 0, priceAtomic: "0", agentId: "" }));
   }, []);
 
@@ -87,7 +98,7 @@ export function LiveDemo() {
     setLogIndex(0);
     setError(null);
     try {
-      const res = await fetch("/demo/verify", { method: "POST" });
+      const res = await fetch(`/demo/verify?case=${encodeURIComponent(selectedCase)}`, { method: "POST" });
       const body = await res.json();
       if (!res.ok) {
         setError(body.error ?? "The live demo failed unexpectedly.");
@@ -126,11 +137,38 @@ export function LiveDemo() {
           </p>
         </header>
 
-        <div className="mt-14 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
+        {status?.cases && status.cases.length > 1 ? (
+          <div className="mt-8 flex flex-wrap gap-2">
+            {status.cases.map((option) => (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => {
+                  if (phase === "running") return;
+                  setSelectedCase(option.id);
+                  setPhase("idle");
+                  setError(null);
+                  setVerdict(null);
+                  setSettlement(null);
+                }}
+                disabled={phase === "running"}
+                className={`rounded-md border px-3.5 py-1.5 font-mono-data text-[11px] uppercase tracking-[0.1em] transition-colors ${
+                  selectedCase === option.id
+                    ? "border-verify bg-verify/10 text-verify"
+                    : "border-border/80 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_1.2fr]">
           <div className="rounded-lg border border-border/80 bg-ink-soft/60 p-7">
             <p className="font-mono-data text-[11px] uppercase tracking-[0.14em] text-muted-foreground">The request this sends</p>
             <pre className="mt-4 overflow-x-auto whitespace-pre-wrap font-mono-data text-xs leading-relaxed text-foreground/85">
-{DEMO_SPEC_PREVIEW}
+{DEMO_CASE_PREVIEW[selectedCase] ?? DEMO_CASE_PREVIEW.otto}
             </pre>
             <dl className="mt-6 grid grid-cols-2 gap-4 font-mono-data text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
               <div>

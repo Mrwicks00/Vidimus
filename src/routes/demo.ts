@@ -12,23 +12,59 @@ import type { OnchainDeliverable } from "../modules/m3-onchain.js";
 
 export const demoRoute = new Hono();
 
-// The real Otto AI swap tx already covered in the track record (docs/ROADMAP.md D7) - a real,
-// independently reproducible mainnet fact, not a synthetic fixture, so every demo run reads
-// live chain state rather than replaying a canned response.
-const DEMO_SWAP_TX = "0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697" as const;
-const DEMO_USDT0 = "0x779ded0c9e1022225f8e0630b35a9b54be713736" as const;
+// Both cases below are real, independently reproducible mainnet facts already covered in the
+// track record (docs/ROADMAP.md D7) - fixed historical tx hashes, not synthetic fixtures, so
+// every demo run re-derives the verdict from live chain state rather than replaying a canned
+// response. Barker Yield Agent isn't offered here: its original verification read live
+// external market data at the time, not a frozen on-chain fact, so it can't be replayed
+// deterministically without either a live paid re-fetch each click or a fabricated snapshot.
+const USDT0 = "0x779ded0c9e1022225f8e0630b35a9b54be713736" as const;
 
-const DEMO_SPEC = `Verify a token swap executed on X Layer mainnet by a third-party agent (Otto AI):
-- The transaction ${DEMO_SWAP_TX} must exist and be confirmed on X Layer mainnet.
-- The transaction must move at least 0.05 USDT0 (token ${DEMO_USDT0}) - the amount the swap was
-  paid to move.`;
+interface DemoCase {
+  id: string;
+  label: string;
+  spec: string;
+  deliverable: { onchain: OnchainDeliverable };
+}
 
-const DEMO_DELIVERABLE: { onchain: OnchainDeliverable } = {
-  onchain: {
-    "onchain.tx_exists": [{ txHash: DEMO_SWAP_TX }],
-    "onchain.transfer_check": [{ txHash: DEMO_SWAP_TX, asset: DEMO_USDT0, amountMin: "50000" }],
+const OTTO_SWAP_TX = "0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697" as const;
+const IDLEFLOW_APPROVE_TX = "0xe8ef44af871f5a118adbd85d1308247ca1a62c6b0be144c4bc276cec56a59c44" as const;
+const IDLEFLOW_SUPPLY_TX = "0xb7530922068809688a19ccf77dd16d033e1d101f292ee289bc77349564fb3d03" as const;
+const IDLEFLOW_AAVE_RESERVE = "0xf356ae412db5df43bd3a10746f7ad4e1c4de4297" as const;
+
+const DEMO_CASES: Record<string, DemoCase> = {
+  otto: {
+    id: "otto",
+    label: "Otto AI's swap",
+    spec: `Verify a token swap executed on X Layer mainnet by a third-party agent (Otto AI):
+- The transaction ${OTTO_SWAP_TX} must exist and be confirmed on X Layer mainnet.
+- The transaction must move at least 0.05 USDT0 (token ${USDT0}) - the amount the swap was
+  paid to move.`,
+    deliverable: {
+      onchain: {
+        "onchain.tx_exists": [{ txHash: OTTO_SWAP_TX }],
+        "onchain.transfer_check": [{ txHash: OTTO_SWAP_TX, asset: USDT0, amountMin: "50000" }],
+      },
+    },
+  },
+  idleflow: {
+    id: "idleflow",
+    label: "IdleFlow's DeFi deposit",
+    spec: `Verify a real stablecoin deposit executed by IdleFlow (agent #4523) on X Layer mainnet, via its Stablecoin Yield Allocation service:
+- The approval transaction ${IDLEFLOW_APPROVE_TX} must exist and be confirmed on X Layer mainnet.
+- The supply transaction ${IDLEFLOW_SUPPLY_TX} must exist and be confirmed on X Layer mainnet, and must move at least 200000 atomic units (0.2 USDT) of token ${USDT0} to destination ${IDLEFLOW_AAVE_RESERVE}.
+- IdleFlow claims it deposited into 'the highest-APY vetted Aave V3 market' for USDT on X Layer - verify this claim is actually true against real current market data, not just that a deposit happened.`,
+    deliverable: {
+      onchain: {
+        "onchain.tx_exists": [{ txHash: IDLEFLOW_APPROVE_TX }, { txHash: IDLEFLOW_SUPPLY_TX }],
+        "onchain.destination_check": [{ txHash: IDLEFLOW_SUPPLY_TX, destination: IDLEFLOW_AAVE_RESERVE, asset: USDT0 }],
+        "onchain.transfer_check": [{ txHash: IDLEFLOW_SUPPLY_TX, asset: USDT0, amountMin: "200000" }],
+      },
+    },
   },
 };
+
+const DEFAULT_DEMO_CASE = "otto";
 
 interface DemoState {
   lastRunAt: number;
@@ -66,12 +102,20 @@ demoRoute.get("/demo/status", (c) => {
     dailyRemaining: enabled ? Math.max(0, config.demoDailyLimit - state.countToday) : 0,
     priceAtomic: config.priceAtomic.toString(),
     agentId: config.erc8004Id,
+    cases: Object.values(DEMO_CASES).map((c) => ({ id: c.id, label: c.label })),
+    defaultCase: DEFAULT_DEMO_CASE,
   });
 });
 
 demoRoute.post("/demo/verify", async (c) => {
   if (!config.demoBuyerPrivateKey) {
     return c.json({ error: "The live demo isn't funded on this deployment. See the track record above for real verified evidence." }, 503);
+  }
+
+  const requestedCase = c.req.query("case") ?? DEFAULT_DEMO_CASE;
+  const demoCase = DEMO_CASES[requestedCase];
+  if (!demoCase) {
+    return c.json({ error: `unknown demo case "${requestedCase}"` }, 400);
   }
 
   rollDayIfNeeded();
@@ -137,7 +181,7 @@ demoRoute.post("/demo/verify", async (c) => {
     const second = await fetch(verifyUrl, {
       method: "POST",
       headers: { "PAYMENT-SIGNATURE": encodedHeader, "content-type": "application/json" },
-      body: JSON.stringify({ spec: DEMO_SPEC, deliverable: DEMO_DELIVERABLE }),
+      body: JSON.stringify({ spec: demoCase.spec, deliverable: demoCase.deliverable }),
     });
     const bodyText = await second.text();
     if (second.status !== 200) {

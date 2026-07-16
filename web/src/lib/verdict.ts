@@ -38,10 +38,17 @@ export interface Settlement {
   payer: string;
 }
 
+export interface DemoCaseOption {
+  id: string;
+  label: string;
+}
+
 export interface DemoStatus {
   enabled: boolean;
   cooldownRemainingSeconds: number;
   dailyRemaining: number;
   priceAtomic: string;
   agentId: string;
+  cases?: DemoCaseOption[];
+  defaultCase?: string;
 }
