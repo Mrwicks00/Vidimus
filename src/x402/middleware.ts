@@ -31,7 +31,7 @@ export async function x402Gate(c: Context, next: Next) {
     return c.json({ error: message }, 402);
   }
 
-  const settlement = await settlePayment(decoded.payload.authorization, accepted);
+  const settlement = await settlePayment(decoded.payload.authorization, decoded.payload.signature, accepted);
   c.header("PAYMENT-RESPONSE", encodePaymentResponseHeader(settlement));
   c.set("paymentId", settlement.transaction);
 

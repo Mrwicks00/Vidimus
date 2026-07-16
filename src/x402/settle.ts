@@ -16,11 +16,15 @@ const chain = {
 const publicClient = createPublicClient({ chain, transport: http(config.rpcUrl) });
 const walletClient = createWalletClient({ account, chain, transport: http(config.rpcUrl) });
 
-export async function settlePayment(auth: Eip3009Authorization, accepted: AcceptsEntry): Promise<PaymentResponse> {
+export async function settlePayment(
+  auth: Eip3009Authorization,
+  signature: `0x${string}`,
+  accepted: AcceptsEntry,
+): Promise<PaymentResponse> {
   // EIP-3009 signs directly against the token - no intermediary contract, no pre-approval step.
   // The signed authorization is a single packed 65-byte (r,s,v) signature; the token's own
   // transferWithAuthorization takes the split form.
-  const { r, s, v } = hexToSignature(auth.signature);
+  const { r, s, v } = hexToSignature(signature);
 
   const txHash = await walletClient.writeContract({
     address: accepted.asset,

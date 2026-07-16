@@ -14,7 +14,7 @@ export function decodePaymentSignatureHeader(headerValue: string): PaymentSignat
     throw new PaymentVerificationError("PAYMENT-SIGNATURE header is not valid base64url JSON");
   }
   const header = parsed as Partial<PaymentSignatureHeader>;
-  if (header.x402Version !== 2 || header.scheme !== "exact" || !header.payload?.authorization) {
+  if (header.x402Version !== 2 || !header.payload?.authorization || !header.payload.signature) {
     throw new PaymentVerificationError("PAYMENT-SIGNATURE header has an unrecognized shape");
   }
   return header as PaymentSignatureHeader;
@@ -22,10 +22,8 @@ export function decodePaymentSignatureHeader(headerValue: string): PaymentSignat
 
 export async function verifyPayment(header: PaymentSignatureHeader, accepted: AcceptsEntry): Promise<void> {
   const auth = header.payload.authorization;
+  const signature = header.payload.signature;
 
-  if (header.network !== accepted.network) {
-    throw new PaymentVerificationError("network mismatch");
-  }
   if (auth.to.toLowerCase() !== accepted.payTo.toLowerCase()) {
     throw new PaymentVerificationError("authorization recipient does not match payTo");
   }
@@ -55,7 +53,7 @@ export async function verifyPayment(header: PaymentSignatureHeader, accepted: Ac
       validBefore: BigInt(auth.validBefore),
       nonce: auth.nonce,
     },
-    signature: auth.signature,
+    signature,
   });
 
   if (recovered.toLowerCase() !== auth.from.toLowerCase()) {

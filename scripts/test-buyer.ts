@@ -100,13 +100,10 @@ async function main() {
     validAfter: validAfter.toString(),
     validBefore: validBefore.toString(),
     nonce,
-    signature,
   };
   const header: PaymentSignatureHeader = {
     x402Version: 2,
-    scheme: "exact",
-    network: accepted.network,
-    payload: { authorization: auth },
+    payload: { authorization: auth, signature },
   };
   const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString("base64url");
 

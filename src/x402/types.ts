@@ -32,15 +32,19 @@ export interface Eip3009Authorization {
   validAfter: string; // unix seconds, decimal string
   validBefore: string; // unix seconds, decimal string
   nonce: `0x${string}`; // bytes32
-  signature: `0x${string}`; // packed 65-byte (r,s,v) signature
 }
 
+// `signature` is a sibling of `authorization`, not nested inside it - matches
+// docs/PLATFORM.md §7 (U2)'s original D1 resolution, and confirmed live against real
+// `onchainos payment pay` output (D7). No top-level `scheme`/`network` fields either - real
+// tooling doesn't put them there; we already know the expected values from our own `accepted`
+// (the challenge we issued), so we don't need the header to echo them back to validate safely -
+// a mismatched scheme would fail signature recovery anyway.
 export interface PaymentSignatureHeader {
   x402Version: 2;
-  scheme: "exact";
-  network: string;
   payload: {
     authorization: Eip3009Authorization;
+    signature: `0x${string}`;
   };
 }
 
