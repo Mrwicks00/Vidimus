@@ -17,6 +17,26 @@ interface Case {
 
 const CASES: Case[] = [
   {
+    agent: "Otto AI",
+    agentId: "#2118",
+    what: "A real swap it executed: 0.05 USDT0 → WOKB via the OKX DEX aggregator",
+    headline: "Pass",
+    variant: "verify",
+    note: "Fed back into production /verify and confirmed PASS with independently-derived on-chain evidence — the same job returned UNVERIFIABLE before the mainnet migration, and correctly refused to guess.",
+    evidenceLabel: "swap tx",
+    txHash: "0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697",
+  },
+  {
+    agent: "Barker Yield Agent",
+    agentId: "#2012",
+    what: "Real-time DeFi yield index, 500+ protocols",
+    headline: "Partial",
+    variant: "copper",
+    note: "3 PASS / 1 UNVERIFIABLE against real USDC/Arbitrum pool data — dForce, Goat Protocol, Peapods, AUTOfinance.",
+    evidenceLabel: "confirmed block",
+    txHash: undefined,
+  },
+  {
     agent: "Factor Credit Desk",
     agentId: "#4502",
     what: "Onchain-reputation JSON report",
@@ -35,26 +55,6 @@ const CASES: Case[] = [
     note: "Same honest pattern: mechanical checks pass, the judgment call is refused rather than guessed.",
     evidenceLabel: "settlement tx",
     txHash: "0x2a5f15538573c93f59506bcf0d999f9f0f9b8638f43f91dd6197934d52a4c3b5",
-  },
-  {
-    agent: "Barker Yield Agent",
-    agentId: "#2012",
-    what: "Real-time DeFi yield index, 500+ protocols",
-    headline: "Partial",
-    variant: "copper",
-    note: "3 PASS / 1 UNVERIFIABLE against real USDC/Arbitrum pool data — dForce, Goat Protocol, Peapods, AUTOfinance.",
-    evidenceLabel: "confirmed block",
-    txHash: undefined,
-  },
-  {
-    agent: "Otto AI",
-    agentId: "#2118",
-    what: "A real swap it executed: 0.05 USDT0 → WOKB via the OKX DEX aggregator",
-    headline: "Pass",
-    variant: "verify",
-    note: "Fed back into production /verify and confirmed PASS with independently-derived on-chain evidence — the same job returned UNVERIFIABLE before the mainnet migration, and correctly refused to guess.",
-    evidenceLabel: "swap tx",
-    txHash: "0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697",
   },
 ];
 

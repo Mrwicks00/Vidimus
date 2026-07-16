@@ -15,8 +15,8 @@ function App() {
       <Exhibits />
       <Lifecycle />
       <EvidenceRegistry />
-      <TrackRecord />
       <LiveDemo />
+      <TrackRecord />
       <Footer />
     </div>
   );

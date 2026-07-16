@@ -34,11 +34,11 @@ export function Nav() {
           <a href="#registry" className="text-muted-foreground transition-colors hover:text-foreground">
             Evidence
           </a>
-          <a href="#track-record" className="text-muted-foreground transition-colors hover:text-foreground">
-            Track record
-          </a>
           <a href="#demo" className="text-muted-foreground transition-colors hover:text-foreground">
             Try it
+          </a>
+          <a href="#track-record" className="text-muted-foreground transition-colors hover:text-foreground">
+            Track record
           </a>
           <a
             href={SITE.githubUrl}
