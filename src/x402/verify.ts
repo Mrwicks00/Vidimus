@@ -1,7 +1,7 @@
 import { recoverTypedDataAddress } from "viem";
 import { config } from "../config.js";
 import type { AcceptsEntry, PaymentSignatureHeader } from "./types.js";
-import { permit2Domain, PERMIT2_TRANSFER_TYPES } from "./permit2.js";
+import { EIP3009_TRANSFER_TYPES, eip3009Domain } from "./eip3009.js";
 import { isNonceUsed } from "./nonceStore.js";
 
 export class PaymentVerificationError extends Error {}
@@ -14,60 +14,51 @@ export function decodePaymentSignatureHeader(headerValue: string): PaymentSignat
     throw new PaymentVerificationError("PAYMENT-SIGNATURE header is not valid base64url JSON");
   }
   const header = parsed as Partial<PaymentSignatureHeader>;
-  if (
-    header.x402Version !== 2 ||
-    header.scheme !== "exact" ||
-    !header.payload?.permit2Authorization
-  ) {
+  if (header.x402Version !== 2 || header.scheme !== "exact" || !header.payload?.authorization) {
     throw new PaymentVerificationError("PAYMENT-SIGNATURE header has an unrecognized shape");
   }
   return header as PaymentSignatureHeader;
 }
 
-export async function verifyPayment(
-  header: PaymentSignatureHeader,
-  accepted: AcceptsEntry,
-): Promise<void> {
-  const auth = header.payload.permit2Authorization;
+export async function verifyPayment(header: PaymentSignatureHeader, accepted: AcceptsEntry): Promise<void> {
+  const auth = header.payload.authorization;
 
   if (header.network !== accepted.network) {
     throw new PaymentVerificationError("network mismatch");
   }
-  if (auth.permitted.token.toLowerCase() !== accepted.asset.toLowerCase()) {
-    throw new PaymentVerificationError("token mismatch");
+  if (auth.to.toLowerCase() !== accepted.payTo.toLowerCase()) {
+    throw new PaymentVerificationError("authorization recipient does not match payTo");
   }
-  if (BigInt(auth.permitted.amount) < BigInt(accepted.amount)) {
+  if (BigInt(auth.value) < BigInt(accepted.amount)) {
     throw new PaymentVerificationError("signed amount is less than the required amount");
   }
-  if (auth.spender.toLowerCase() !== accepted.payTo.toLowerCase()) {
-    throw new PaymentVerificationError("spender does not match payTo");
-  }
-  const deadline = BigInt(auth.deadline);
   const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
-  if (deadline < nowSeconds) {
+  if (BigInt(auth.validBefore) < nowSeconds) {
     throw new PaymentVerificationError("authorization has expired");
   }
-  if (isNonceUsed(auth.owner, auth.nonce)) {
+  if (BigInt(auth.validAfter) > nowSeconds) {
+    throw new PaymentVerificationError("authorization is not yet valid");
+  }
+  if (isNonceUsed(auth.from, auth.nonce)) {
     throw new PaymentVerificationError("nonce already used");
   }
 
   const recovered = await recoverTypedDataAddress({
-    domain: permit2Domain(config.chainId),
-    types: PERMIT2_TRANSFER_TYPES,
-    primaryType: "PermitTransferFrom",
+    domain: eip3009Domain(accepted.extra.name, accepted.extra.version, config.chainId, accepted.asset),
+    types: EIP3009_TRANSFER_TYPES,
+    primaryType: "TransferWithAuthorization",
     message: {
-      permitted: {
-        token: auth.permitted.token,
-        amount: BigInt(auth.permitted.amount),
-      },
-      spender: auth.spender,
-      nonce: BigInt(auth.nonce),
-      deadline: BigInt(auth.deadline),
+      from: auth.from,
+      to: auth.to,
+      value: BigInt(auth.value),
+      validAfter: BigInt(auth.validAfter),
+      validBefore: BigInt(auth.validBefore),
+      nonce: auth.nonce,
     },
     signature: auth.signature,
   });
 
-  if (recovered.toLowerCase() !== auth.owner.toLowerCase()) {
-    throw new PaymentVerificationError("signature does not match the claimed owner");
+  if (recovered.toLowerCase() !== auth.from.toLowerCase()) {
+    throw new PaymentVerificationError("signature does not match the claimed sender");
   }
 }

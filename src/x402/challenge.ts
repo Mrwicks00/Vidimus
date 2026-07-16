@@ -1,6 +1,5 @@
 import { config } from "../config.js";
 import type { PaymentRequirements } from "./types.js";
-import { PERMIT2_DOMAIN_NAME } from "./permit2.js";
 
 export function buildPaymentRequirements(resourceUrl: string): PaymentRequirements {
   return {
@@ -19,9 +18,8 @@ export function buildPaymentRequirements(resourceUrl: string): PaymentRequiremen
         payTo: config.payToAddress,
         maxTimeoutSeconds: 300,
         extra: {
-          name: PERMIT2_DOMAIN_NAME,
-          version: "1",
-          assetTransferMethod: "permit2",
+          name: config.paymentTokenName,
+          version: config.paymentTokenVersion,
         },
       },
     ],

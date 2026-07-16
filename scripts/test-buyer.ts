@@ -1,12 +1,16 @@
-// Drives the real D1/D2 round-trip against a live server, acting as the paying buyer:
-// hit /verify -> get 402 -> decode accepts -> approve Permit2 (first run only) -> sign
-// PermitTransferFrom -> replay with PAYMENT-SIGNATURE + a spec body -> print the verdict.
+// Drives a real round-trip against a live server, acting as the paying buyer: hit /verify ->
+// get 402 -> decode accepts -> sign an EIP-3009 transferWithAuthorization directly against the
+// token's own EIP-712 domain (no intermediary contract, no pre-approval step) -> replay with
+// PAYMENT-SIGNATURE + a spec body -> print the verdict. Replaces the earlier Permit2-based
+// flow (see git history) - real OKX-ecosystem payment tooling defaults to Permit2's
+// witness-augmented variant, which this project has no documented way to verify safely;
+// EIP-3009 is simpler, well-documented, and what real third-party agents use in practice.
 import "dotenv/config";
 import { readFileSync } from "node:fs";
-import { createPublicClient, createWalletClient, http, maxUint256 } from "viem";
+import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { PaymentRequirements, Permit2Authorization, PaymentSignatureHeader, PaymentResponse } from "../src/x402/types.js";
-import { ERC20_ABI, PERMIT2_ADDRESS, permit2Domain, PERMIT2_TRANSFER_TYPES } from "../src/x402/permit2.js";
+import type { PaymentRequirements, Eip3009Authorization, PaymentSignatureHeader, PaymentResponse } from "../src/x402/types.js";
+import { EIP3009_TRANSFER_TYPES, eip3009Domain } from "../src/x402/eip3009.js";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -65,59 +69,44 @@ async function main() {
   const accepted = requirements.accepts[0];
   console.log("Got 402. accepts[0] =", accepted);
 
-  const buyerOkbBalance = await publicClient.getBalance({ address: account.address });
-  if (buyerOkbBalance === 0n) {
-    throw new Error("Buyer wallet has no OKB for the Permit2 approve tx - fund it first.");
+  const buyerBalance = await publicClient.getBalance({ address: account.address });
+  if (buyerBalance === 0n) {
+    console.warn("Warning: buyer wallet has no native gas token - fine for signing (EIP-3009 needs no buyer-side tx), but check if this is unexpected.");
   }
 
-  const currentAllowance = await publicClient.readContract({
-    address: accepted.asset,
-    abi: ERC20_ABI,
-    functionName: "allowance",
-    args: [account.address, PERMIT2_ADDRESS],
-  });
-  if (currentAllowance < BigInt(accepted.amount)) {
-    console.log("Approving Permit2 to spend the payment token (one-time)...");
-    const approveTx = await walletClient.writeContract({
-      address: accepted.asset,
-      abi: ERC20_ABI,
-      functionName: "approve",
-      args: [PERMIT2_ADDRESS, maxUint256],
-    });
-    await publicClient.waitForTransactionReceipt({ hash: approveTx });
-    console.log(`Approved (tx ${approveTx}).`);
-  } else {
-    console.log("Permit2 already approved for this token.");
-  }
-
-  const nonce = BigInt(`0x${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}`) % (2n ** 250n);
-  const deadline = BigInt(Math.floor(Date.now() / 1000) + accepted.maxTimeoutSeconds);
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+  const validAfter = 0n;
+  const validBefore = nowSeconds + BigInt(accepted.maxTimeoutSeconds);
+  const nonce = `0x${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}` as `0x${string}`;
 
   const signature = await walletClient.signTypedData({
-    domain: permit2Domain(chainId),
-    types: PERMIT2_TRANSFER_TYPES,
-    primaryType: "PermitTransferFrom",
+    domain: eip3009Domain(accepted.extra.name, accepted.extra.version, chainId, accepted.asset),
+    types: EIP3009_TRANSFER_TYPES,
+    primaryType: "TransferWithAuthorization",
     message: {
-      permitted: { token: accepted.asset, amount: BigInt(accepted.amount) },
-      spender: accepted.payTo,
+      from: account.address,
+      to: accepted.payTo,
+      value: BigInt(accepted.amount),
+      validAfter,
+      validBefore,
       nonce,
-      deadline,
     },
   });
 
-  const auth: Permit2Authorization = {
-    owner: account.address,
-    permitted: { token: accepted.asset, amount: accepted.amount },
-    spender: accepted.payTo,
-    nonce: nonce.toString(),
-    deadline: deadline.toString(),
+  const auth: Eip3009Authorization = {
+    from: account.address,
+    to: accepted.payTo,
+    value: accepted.amount,
+    validAfter: validAfter.toString(),
+    validBefore: validBefore.toString(),
+    nonce,
     signature,
   };
   const header: PaymentSignatureHeader = {
     x402Version: 2,
     scheme: "exact",
     network: accepted.network,
-    payload: { permit2Authorization: auth },
+    payload: { authorization: auth },
   };
   const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString("base64url");
 

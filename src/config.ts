@@ -13,6 +13,10 @@ export const config = {
   facilitatorPrivateKey: required("FACILITATOR_PRIVATE_KEY") as `0x${string}`,
   payToAddress: required("PAY_TO_ADDRESS") as `0x${string}`,
   paymentTokenAddress: required("PAYMENT_TOKEN_ADDRESS") as `0x${string}`,
+  // EIP-3009 signs directly against the token's own EIP-712 domain - these must exactly match
+  // what the deployed token contract actually uses, or every signature recovery will fail.
+  paymentTokenName: required("PAYMENT_TOKEN_NAME"),
+  paymentTokenVersion: required("PAYMENT_TOKEN_VERSION"),
   priceAtomic: BigInt(process.env.PRICE_ATOMIC ?? "100000"),
   erc8004Id: process.env.ERC8004_ID ?? "",
   erc8004Address: (process.env.ERC8004_ADDRESS ?? "") as `0x${string}` | "",

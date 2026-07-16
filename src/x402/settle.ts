@@ -1,8 +1,8 @@
-import { createPublicClient, createWalletClient, http } from "viem";
+import { createPublicClient, createWalletClient, http, hexToSignature } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { config } from "../config.js";
-import type { AcceptsEntry, Permit2Authorization, PaymentResponse } from "./types.js";
-import { PERMIT2_ABI, PERMIT2_ADDRESS } from "./permit2.js";
+import type { AcceptsEntry, Eip3009Authorization, PaymentResponse } from "./types.js";
+import { EIP3009_ABI } from "./eip3009.js";
 import { markNonceUsed } from "./nonceStore.js";
 
 const account = privateKeyToAccount(config.facilitatorPrivateKey);
@@ -16,30 +16,17 @@ const chain = {
 const publicClient = createPublicClient({ chain, transport: http(config.rpcUrl) });
 const walletClient = createWalletClient({ account, chain, transport: http(config.rpcUrl) });
 
-export async function settlePayment(
-  auth: Permit2Authorization,
-  accepted: AcceptsEntry,
-): Promise<PaymentResponse> {
+export async function settlePayment(auth: Eip3009Authorization, accepted: AcceptsEntry): Promise<PaymentResponse> {
+  // EIP-3009 signs directly against the token - no intermediary contract, no pre-approval step.
+  // The signed authorization is a single packed 65-byte (r,s,v) signature; the token's own
+  // transferWithAuthorization takes the split form.
+  const { r, s, v } = hexToSignature(auth.signature);
+
   const txHash = await walletClient.writeContract({
-    address: PERMIT2_ADDRESS,
-    abi: PERMIT2_ABI,
-    functionName: "permitTransferFrom",
-    args: [
-      {
-        permitted: {
-          token: auth.permitted.token,
-          amount: BigInt(auth.permitted.amount),
-        },
-        nonce: BigInt(auth.nonce),
-        deadline: BigInt(auth.deadline),
-      },
-      {
-        to: accepted.payTo,
-        requestedAmount: BigInt(accepted.amount),
-      },
-      auth.owner,
-      auth.signature,
-    ],
+    address: accepted.asset,
+    abi: EIP3009_ABI,
+    functionName: "transferWithAuthorization",
+    args: [auth.from, auth.to, BigInt(auth.value), BigInt(auth.validAfter), BigInt(auth.validBefore), auth.nonce, Number(v), r, s],
   });
 
   const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
@@ -47,13 +34,13 @@ export async function settlePayment(
     throw new Error(`settlement transaction reverted: ${txHash}`);
   }
 
-  markNonceUsed(auth.owner, auth.nonce);
+  markNonceUsed(auth.from, auth.nonce);
 
   return {
     status: "success",
     transaction: txHash,
     amount: accepted.amount,
-    payer: auth.owner,
+    payer: auth.from,
   };
 }
 
