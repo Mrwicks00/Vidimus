@@ -412,6 +412,62 @@ evidence and a correct taste refusal.
   worth knowing before any future price revisit.
   (2) the `okx-agentic-wallet security` subcontract's real cost also fits under the same flat
   price - not yet measured.
+- **Listing rejected twice, mainnet migration completed, x402 payment protocol rewritten
+  (2026-07-13/16) - closes the mainnet gap this D7 section already flagged above.**
+  - **Rejection #1 (avatar)**: dimensions/rounded-corners/polish. Fixed with a new 440×440
+    square image, resubmitted, passed AI pre-check again.
+  - **Rejection #2 (real, substantive)**: *"Set the network in your 402 challenge to the
+    CAIP-2 value eip155:196 (X Layer)"* - OKX's own review caught exactly the testnet/mainnet
+    gap this doc already flagged from the Otto swap test above. Fixed for real this time:
+    facilitator wallet (`0x2085…f0a9`) funded with real OKB; Render's `CHAIN_ID`/`RPC_URL`/
+    `PAYMENT_TOKEN_ADDRESS` switched to mainnet (196, the same Alchemy key covers both
+    networks - no new RPC provider needed); `PAYMENT_TOKEN_ADDRESS` pointed at the real USD₮0
+    contract used throughout this session (confirmed on-chain: $111M+ total supply, not a
+    mock). **This project no longer targets testnet anywhere** - local `.env` was updated to
+    match production rather than preserved as a separate testnet config (explicit developer
+    call: no more dual-target complexity).
+  - **A second, deeper bug found while proving the mainnet round-trip**: the first live mainnet
+    payment attempt against our own `/verify` failed with `PAYMENT-SIGNATURE header has an
+    unrecognized shape` when signed via `onchainos payment pay` (real OKX-ecosystem payment
+    tooling) - not a fluke. Root cause: this project's x402 implementation had only ever been
+    tested against itself (`scripts/test-buyer.ts` both wrote the challenge-consuming client
+    *and* the server that validates it), never against real independent tooling, until this
+    session. `onchainos` defaults any `extra.assetTransferMethod: "permit2"` declaration to
+    Permit2's **witness-augmented** `PermitWitnessTransferFrom` variant, which this project's
+    Permit2 implementation (the plain, non-witness `PermitTransferFrom`) had no way to verify
+    or settle - meaning **a real buyer using standard OKX tooling could never have paid this
+    service successfully**, even before mainnet. The witness type string is undocumented
+    anywhere found (including OKX's own `okx-agent-payments-protocol` skill) - correctly
+    treated as un-guessable for money-moving contract code rather than reverse-engineered from
+    one example.
+  - **Fix: replaced Permit2 with EIP-3009** (`transferWithAuthorization`, signed directly
+    against the payment token's own EIP-712 domain, no intermediary contract, no pre-approval
+    step) across `src/x402/{types,eip3009,challenge,verify,settle,middleware}.ts` and
+    `scripts/test-buyer.ts`; deleted the now-dead `src/x402/permit2.ts`. Confirmed
+    EIP-3009 support on the real USD₮0 contract via a **read-only** `simulateContract` probe
+    (zero funds moved) before writing any settlement code: the `(v,r,s)`-split function
+    reverted with the token's own branded `"TetherToken: invalid signature"` error, proving
+    the real function was reached and executing genuine signature-checking logic - not a
+    guess. Every third-party agent paid this session already used exactly this scheme
+    successfully against the same token, independently corroborating the choice.
+  - **A second wire-shape bug caught on the first real test** (own mistake, not a new
+    discovery): initially nested `signature` inside the `authorization` object, copying the
+    old `Permit2Authorization` field layout instead of following `docs/PLATFORM.md` §7 (U2)'s
+    own D1-documented shape (`{signature, authorization:{...}}`, siblings) - and initially kept
+    a top-level `scheme`/`network` check that real tooling doesn't populate (both live only
+    inside `accepted`, not at the header's top level; dropped the check entirely since the
+    expected values are already known locally from the issued challenge - a scheme/network
+    mismatch fails signature recovery anyway, no separate check needed). Caught immediately by
+    testing against real `onchainos payment pay` output rather than assuming the fix was
+    correct.
+  - **Fully proven end to end after both fixes**: re-ran the exact same Otto-swap verification
+    from the pre-mainnet UNVERIFIABLE test above - this time `content.tx_exists` (sic,
+    `onchain.tx_exists`) came back **PASS**, `"tx ... exists and is confirmed (block
+    65102442)"` - real settlement tx `0x0ca0f0aa8b24f5fe413548c87970a2f9b75bfc7f6b3fb8fc530cfa2ed62cd8c0`
+    confirmed on-chain (`SUCCESS`, facilitator wallet submitted + paid gas, called the token
+    contract directly, moved 0.1 USDT), signature recovered and matched to the on-chain
+    ERC-8004 owner of agent 4933 via `scripts/verify-verdict.ts` - both checks PASS. Listing
+    resubmitted after the network fix; review pending as of this write-up.
 - **Submit the A2MCP listing for OKX review** (~24h, parallel) — do this **early in the day** so
   review overlaps, not blocks (PLATFORM §5).
 - Run live verifications against 3+ real agents across kinds (onchain: #2171; data: #2023; plus
