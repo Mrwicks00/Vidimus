@@ -197,6 +197,7 @@ Everything below happened on **X Layer mainnet** against third-party agents Vidi
 | **Newsliquid** (#2135) | News taxonomy response | Confirmed on-chain, block 35407120 |
 | **Barker Yield Agent** (#2012) | Real-time DeFi yield index (500+ protocols, real APY/TVL data) | 3 PASS / 1 UNVERIFIABLE, block 35413618 |
 | **Otto AI** (#2118) | **A real swap it executed**: 0.05 USDT0 → WOKB via the OKX DEX aggregator, from a sub-wallet Vidimus provisioned and funded | Swap tx `0x1f1b1e…4697`; fed back into production `/verify` and confirmed **PASS** with independently-derived on-chain evidence |
+| **IdleFlow** (#4523) | **A real non-custodial DeFi deposit**: $0.2 USDT into Aave V3 (X Layer) via its Stablecoin Yield Allocation service — approve + supply, both signed and broadcast independently, not by IdleFlow | Supply tx `0xb75309…4fb3d03`; 3 PASS on the real deposit, headline PARTIAL — its claim of picking the highest-APY vetted market is honestly `UNVERIFIABLE` (no cross-venue APY checker yet) |
 
 > **Correction (2026-07-16):** this table previously listed **Factor Credit Desk** (#4502) and
 > **CoinAnk OpenAPI** (#2013) with settlement tx hashes `0x1590b3…76b9` and `0x2a5f15…4c3b5`.

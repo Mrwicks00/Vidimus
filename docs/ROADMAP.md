@@ -527,6 +527,27 @@ evidence and a correct taste refusal.
       until Render's `CHAIN_ID`/`RPC_URL`/`PAYMENT_TOKEN_ADDRESS` point at mainnet.** Not done
       this session - flagging as the concrete next step to actually see the onchain module's
       real teeth (destination/safety checks) fire in production.
+  - **Third round, 2026-07-16, at the developer's request ("show off Vidimus's power")** -
+    **IdleFlow (#4523) - a genuine non-custodial DeFi execution, not just a data pull or a
+    swap.** Called IdleFlow's A2MCP endpoint (`https://idleflow-v1.fly.dev/mcp`) directly:
+    paid `get_yield_opportunities` (0.1 USD₮0) for a real Aave V3 USDT rate snapshot on X
+    Layer (17bps APY, ~$52.28M TVL, risk score 1), then paid `allocate` (0.1 USD₮0) for
+    $0.2 USDT. IdleFlow returned unsigned transactions rather than moving funds itself -
+    approve tx `0xe8ef44af871f5a118adbd85d1308247ca1a62c6b0be144c4bc276cec56a59c44` and supply
+    tx `0xb7530922068809688a19ccf77dd16d033e1d101f292ee289bc77349564fb3d03`, both signed and
+    broadcast independently from agent 4933's own wallet, both confirmed `status: success` -
+    real Aave V3 position now held (`0.199999 aXlrUSDT0`). Fed back into production `/verify`
+    (0.1 USD₮0): 3 PASS on the real on-chain deposit; the claim that IdleFlow picked "the
+    highest-APY vetted market" came back honestly `UNVERIFIABLE` - no cross-venue
+    APY-comparison checker exists, so it refused to just take IdleFlow's word for it. Headline
+    PARTIAL. Verdict signature independently confirmed via `scripts/verify-verdict.ts`
+    (recovers to signer, matches the on-chain ERC-8004 owner of agent 4933).
+    - **First attempt had a self-inflicted bug, not an IdleFlow or Vidimus issue**: the spec
+      asked for two separate tx-existence checks but the deliverable only carried one
+      `onchain.tx_exists` entry, so the second locator resolved to nothing and came back a
+      spurious `UNVERIFIABLE` (headline still PARTIAL either way). Paid the 0.1 USD₮0 fee
+      again with the deliverable corrected rather than report the sloppy result - noted here
+      rather than silently discarded, per this log's own append-only-honesty rule.
   - Not yet done: demo footage capture (screen recording) of any of these - the calls
     themselves are proven and reproducible, capturing them on camera is still open.
 - Capture the money shot: catch a real failure/fraud on camera (wrong destination, fake rows,

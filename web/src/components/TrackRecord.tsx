@@ -27,6 +27,16 @@ const CASES: Case[] = [
     txHash: "0x1f1b1e4edbe703e6a9bbf0f8aba431c0413b25362047c2aef61f3d65ae046697",
   },
   {
+    agent: "IdleFlow",
+    agentId: "#4523",
+    what: "A real non-custodial DeFi deposit: $0.2 USDT into Aave V3 (X Layer) via its Stablecoin Yield Allocation service",
+    headline: "Partial",
+    variant: "copper",
+    note: "3 PASS on the real on-chain deposit (approve + supply, both confirmed). IdleFlow's claim that it picked the highest-APY vetted market is honestly UNVERIFIABLE — no cross-venue APY-comparison checker exists yet, so we refuse to just take its word for it.",
+    evidenceLabel: "supply tx",
+    txHash: "0xb7530922068809688a19ccf77dd16d033e1d101f292ee289bc77349564fb3d03",
+  },
+  {
     agent: "Barker Yield Agent",
     agentId: "#2012",
     what: "Real-time DeFi yield index, 500+ protocols",
