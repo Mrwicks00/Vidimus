@@ -32,4 +32,13 @@ restore /etc/secrets/onchainos-wallets.b64 "$HOME/.onchainos/wallets.json"
 
 onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status failed - check restored session files"
 
+# okx-a2a A2A communication daemon - OKX.AI's own "agent online status" check pings this,
+# not just the HTTP API below. `doctor --fix` starts the daemon itself (detached) as one of
+# its repair actions, so no separate backgrounding is needed here; `--non-interactive` skips
+# any login-flow prompts that would otherwise hang this script forever. AI provider auth
+# comes from ANTHROPIC_API_KEY (already required above, in config.ts) via the `claude` CLI's
+# own documented auth precedence - no separate token/session file to restore. Non-fatal like
+# the onchainos check above: an A2A hiccup must never take down the paid /verify endpoint.
+./node_modules/.bin/okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
+
 exec node dist/src/index.js
