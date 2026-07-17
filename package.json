@@ -25,6 +25,7 @@
     "node": ">=22.13.0"
   },
   "dependencies": {
+    "@anthropic-ai/claude-code": "^2.1.212",
     "@anthropic-ai/sdk": "^0.110.0",
     "@hono/node-server": "^1.13.7",
     "@okxweb3/a2a-node": "^0.1.9",
@@ -43,6 +44,7 @@
   "allowScripts": {
     "esbuild@0.28.1": true,
     "@okxweb3/a2a-node@0.1.9": true,
-    "protobufjs@7.6.5": true
+    "protobufjs@7.6.5": true,
+    "@anthropic-ai/claude-code@2.1.212": true
   }
 }

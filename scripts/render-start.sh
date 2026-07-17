@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 chmod +x bin/onchainos
-export PATH="$PWD/bin:$PATH"
+export PATH="$PWD/bin:$PWD/node_modules/.bin:$PATH"
 
 mkdir -p "$HOME/.onchainos"
 
@@ -37,8 +37,13 @@ onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status
 # its repair actions, so no separate backgrounding is needed here; `--non-interactive` skips
 # any login-flow prompts that would otherwise hang this script forever. AI provider auth
 # comes from ANTHROPIC_API_KEY (already required above, in config.ts) via the `claude` CLI's
-# own documented auth precedence - no separate token/session file to restore. Non-fatal like
-# the onchainos check above: an A2A hiccup must never take down the paid /verify endpoint.
-./node_modules/.bin/okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
+# own documented auth precedence - no separate token/session file to restore. The provider
+# must be bound explicitly first: okx-a2a's runtime auto-detection only fires when doctor
+# runs from inside an interactive Claude Code session, which never happens in this boot
+# script (confirmed live on Render: doctor --fix alone left provider_binding failing with
+# "no default AI provider is bound"). Both steps non-fatal like the onchainos check above -
+# an A2A hiccup must never take down the paid /verify endpoint.
+okx-a2a ai-provider set --provider claude --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
+okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
 exec node dist/src/index.js
