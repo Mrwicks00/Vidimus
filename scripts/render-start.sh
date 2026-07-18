@@ -35,15 +35,37 @@ onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status
 # okx-a2a A2A communication daemon - OKX.AI's own "agent online status" check pings this,
 # not just the HTTP API below. `doctor --fix` starts the daemon itself (detached) as one of
 # its repair actions, so no separate backgrounding is needed here; `--non-interactive` skips
-# any login-flow prompts that would otherwise hang this script forever. AI provider auth
-# comes from ANTHROPIC_API_KEY (already required above, in config.ts) via the `claude` CLI's
-# own documented auth precedence - no separate token/session file to restore. The provider
-# must be bound explicitly first: okx-a2a's runtime auto-detection only fires when doctor
-# runs from inside an interactive Claude Code session, which never happens in this boot
-# script (confirmed live on Render: doctor --fix alone left provider_binding failing with
-# "no default AI provider is bound"). Both steps non-fatal like the onchainos check above -
-# an A2A hiccup must never take down the paid /verify endpoint.
-okx-a2a ai-provider set --provider claude --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
+# any login-flow prompts that would otherwise hang this script forever. The provider must be
+# bound explicitly first: okx-a2a's runtime auto-detection only fires when doctor runs from
+# inside an interactive Claude Code session, which never happens in this boot script
+# (confirmed live on Render: doctor --fix alone left provider_binding failing with "no
+# default AI provider is bound"). Both steps non-fatal - an A2A hiccup must never take down
+# the paid /verify endpoint.
+#
+# Using codex (not claude) as the AI provider here, pointed at NVIDIA NIM's free-tier
+# OpenAI-compatible endpoint instead of the Anthropic API - the ANTHROPIC_API_KEY ran out of
+# credit and there's no budget to top it up. `codex` supports arbitrary OpenAI-compatible
+# providers via `model_providers` in config.toml, but only through the older `wire_api =
+# "chat"` protocol, which newer codex releases (0.14x+) removed support for - NIM only speaks
+# that older chat-completions shape, not the newer "responses" API - so the version is
+# pinned in package.json (@openai/codex@0.90.0, which still accepts wire_api = "chat") rather
+# than whatever "latest" would resolve to. This config.toml has no secret in it - the actual
+# key comes from the NVIDIA_NIM_API_KEY env var (a plain Render env var is fine here, unlike
+# the onchainos credentials above - not a binary file, no base64/Secret-Files dance needed).
+mkdir -p "$HOME/.codex"
+cat > "$HOME/.codex/config.toml" <<'EOF'
+model_provider = "nvidia_nim"
+model = "meta/llama-3.1-8b-instruct"
+
+[model_providers.nvidia_nim]
+name = "NVIDIA NIM"
+base_url = "https://integrate.api.nvidia.com/v1"
+env_key = "NVIDIA_NIM_API_KEY"
+wire_api = "chat"
+EOF
+[ -n "${NVIDIA_NIM_API_KEY:-}" ] || echo "[render-start] WARNING: NVIDIA_NIM_API_KEY is not set - codex/A2A replies will fail"
+
+okx-a2a ai-provider set --provider codex --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
 okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
 # The A2A daemon writes its own activity log (message sync, heartbeats) to a file that never

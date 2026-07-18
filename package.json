@@ -27,6 +27,7 @@
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.212",
     "@anthropic-ai/sdk": "^0.110.0",
+    "@openai/codex": "0.90.0",
     "@hono/node-server": "^1.13.7",
     "@okxweb3/a2a-node": "^0.1.9",
     "dotenv": "^16.4.5",
