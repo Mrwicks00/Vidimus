@@ -27,5 +27,5 @@ export function buildPaymentRequirements(resourceUrl: string): PaymentRequiremen
 }
 
 export function encodePaymentRequiredHeader(req: PaymentRequirements): string {
-  return Buffer.from(JSON.stringify(req), "utf8").toString("base64url");
+  return Buffer.from(JSON.stringify(req), "utf8").toString("base64");
 }
