@@ -13,7 +13,7 @@ export interface AcceptsEntry {
 
 export interface PaymentRequirements {
   x402Version: 2;
-  resource: { method: string; url: string; description: string };
+  resource: { url: string; description: string; mimeType: string };
   accepts: AcceptsEntry[];
 }
 

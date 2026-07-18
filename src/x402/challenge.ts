@@ -5,9 +5,9 @@ export function buildPaymentRequirements(resourceUrl: string): PaymentRequiremen
   return {
     x402Version: 2,
     resource: {
-      method: "POST",
       url: resourceUrl,
       description: "Vidimus conformance verdict - signed, evidence-backed verification against onchain, dataset, code, and content deliverables",
+      mimeType: "application/json",
     },
     accepts: [
       {
