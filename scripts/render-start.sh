@@ -46,4 +46,16 @@ onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status
 okx-a2a ai-provider set --provider claude --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
 okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
+# Re-run doctor --fix every 2 minutes for the life of the container. The one-shot check above
+# only covers boot time - if the detached daemon dies or the Claude/XMTP binding goes stale
+# later, Render's own health check never notices (it only watches the HTTP port), so nothing
+# would otherwise catch or repair it. Runs in the background so it never blocks or crashes the
+# paid /verify endpoint; non-fatal like the checks above.
+(
+  while true; do
+    sleep 120
+    okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: periodic okx-a2a doctor --fix failed"
+  done
+) &
+
 exec node dist/src/index.js
