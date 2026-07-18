@@ -46,6 +46,13 @@ onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status
 okx-a2a ai-provider set --provider claude --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
 okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
+# The A2A daemon writes its own activity log (message sync, heartbeats) to a file that never
+# reaches Render's captured stdout - stream it in, prefixed, so real inbound-message activity
+# is actually visible in the dashboard. (Deliberately not doing this for `okx-a2a logs llm` -
+# that's the full Claude transcript per reply, tens of KB each, too high-volume to stream
+# permanently; run it manually via Render's Shell when deep-diagnosing a specific reply.)
+(okx-a2a logs server 2>&1 | sed -u 's/^/[okx-a2a] /') &
+
 # Re-run doctor --fix every 2 minutes for the life of the container. The one-shot check above
 # only covers boot time - if the detached daemon dies or the Claude/XMTP binding goes stale
 # later, Render's own health check never notices (it only watches the HTTP port), so nothing
