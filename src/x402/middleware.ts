@@ -28,7 +28,8 @@ export async function x402Gate(c: Context, next: Next) {
     await verifyPayment(decoded, accepted);
   } catch (err) {
     const message = err instanceof PaymentVerificationError ? err.message : "payment verification failed";
-    return c.json({ error: message }, 402);
+    c.header("PAYMENT-REQUIRED", encodePaymentRequiredHeader(requirements));
+    return c.json({ ...requirements, error: message }, 402);
   }
 
   const settlement = await settlePayment(decoded.payload.authorization, decoded.payload.signature, accepted);
