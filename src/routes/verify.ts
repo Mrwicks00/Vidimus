@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { ulid } from "ulid";
 import { x402Gate } from "../x402/middleware.js";
 import { compileCriteria, InjectionSuspectedError } from "../modules/m2-criteria-compiler.js";
@@ -57,7 +57,7 @@ function buildSummary(criteria: Criterion[], headline: VerdictResult, headlineBa
   return parts.join(". ").slice(0, 280);
 }
 
-verifyRoute.post("/verify", x402Gate, async (c) => {
+async function handleVerify(c: Context) {
   const paymentId = c.get("paymentId");
 
   let rawSpec = "";
@@ -180,4 +180,11 @@ verifyRoute.post("/verify", x402Gate, async (c) => {
   }
 
   return c.json(verdict);
-});
+}
+
+// GET is registered alongside POST (both x402-gated) because OKX's marketplace endpoint
+// validator probes with a plain GET before any real paid call - without this, an unpaid GET
+// fell through to the SPA catch-all in index.ts and returned 200 HTML instead of a 402
+// challenge, so the listing review saw "not a valid x402 service".
+verifyRoute.post("/verify", x402Gate, handleVerify);
+verifyRoute.get("/verify", x402Gate, handleVerify);
