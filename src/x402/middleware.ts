@@ -20,6 +20,7 @@ export async function x402Gate(c: Context, next: Next) {
   if (!sigHeader) {
     c.header("PAYMENT-REQUIRED", encodePaymentRequiredHeader(requirements));
     c.header("Cache-Control", "no-store, no-transform");
+    c.header("Content-Encoding", "identity");
     return c.json(requirements, 402);
   }
 
@@ -31,6 +32,7 @@ export async function x402Gate(c: Context, next: Next) {
     const message = err instanceof PaymentVerificationError ? err.message : "payment verification failed";
     c.header("PAYMENT-REQUIRED", encodePaymentRequiredHeader(requirements));
     c.header("Cache-Control", "no-store, no-transform");
+    c.header("Content-Encoding", "identity");
     return c.json({ ...requirements, error: message }, 402);
   }
 
