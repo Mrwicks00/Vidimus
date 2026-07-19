@@ -65,6 +65,16 @@ wire_api = "chat"
 EOF
 [ -n "${NVIDIA_NIM_API_KEY:-}" ] || echo "[render-start] WARNING: NVIDIA_NIM_API_KEY is not set - codex/A2A replies will fail"
 
+# codex's own "logged in" state is separate from the model_providers config above - it's
+# whether codex has *any* OpenAI-account credential on disk, checked by `okx-a2a doctor`'s
+# provider_cli gate regardless of which model_provider is actually active. Without this,
+# doctor reports blockingFailures and wants an interactive `codex login --device-auth`,
+# which can't run on a headless box anyway. `--with-api-key` just writes a local auth
+# record - it does NOT change which provider actual completions route through (that's
+# still model_provider = "nvidia_nim" above, via NVIDIA_NIM_API_KEY's own env_key) -
+# confirmed locally: a real completion via NIM still succeeds after this.
+echo "${NVIDIA_NIM_API_KEY:-unused-placeholder}" | codex login --with-api-key || echo "[render-start] WARNING: codex login --with-api-key failed"
+
 okx-a2a ai-provider set --provider codex --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
 okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
