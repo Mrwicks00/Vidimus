@@ -9,6 +9,24 @@ export interface AcceptsEntry {
     name: string; // the token's own EIP-712 domain name (signed directly against the token,
     version: string; // no intermediary contract) - see docs/PLATFORM.md §7 (U2, D7 revision).
   };
+  // Bazaar-style declaration of the params the paid replay body must carry (see
+  // okx-agent-payments-protocol skill, Step A2 "Source 1"). Without this, a marketplace buyer's
+  // automated flow has no way to know `/verify` needs `spec`/`deliverable` before paying, and
+  // silently posts an empty body - see docs/OKX_ASP_LISTING_GUIDE.md for the live symptom this
+  // was written to fix.
+  outputSchema?: {
+    input: {
+      type: "http";
+      method: "POST";
+      bodyType: "json";
+      body: {
+        type: "object";
+        properties: Record<string, { type: string; description: string }>;
+        required: string[];
+        anyOf?: { required: string[] }[];
+      };
+    };
+  };
 }
 
 export interface PaymentRequirements {

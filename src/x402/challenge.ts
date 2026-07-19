@@ -21,6 +21,32 @@ export function buildPaymentRequirements(resourceUrl: string): PaymentRequiremen
           name: config.paymentTokenName,
           version: config.paymentTokenVersion,
         },
+        outputSchema: {
+          input: {
+            type: "http",
+            method: "POST",
+            bodyType: "json",
+            body: {
+              type: "object",
+              properties: {
+                jobId: {
+                  type: "string",
+                  description: "OKX AI marketplace task ID to verify - spec is fetched automatically; alternative to `spec`",
+                },
+                spec: {
+                  type: "string",
+                  description: "Order spec text - only needed if `jobId` is omitted",
+                },
+                deliverable: {
+                  type: "object",
+                  description: "Deliverable evidence: onchain tx hash(es), dataset, code files, or content",
+                },
+              },
+              required: ["deliverable"],
+              anyOf: [{ required: ["spec"] }, { required: ["jobId"] }],
+            },
+          },
+        },
       },
     ],
   };

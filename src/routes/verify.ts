@@ -21,12 +21,14 @@ import { canonicalize } from "../verdict/canonicalize.js";
 import { config } from "../config.js";
 import type { Criterion, Verdict, VerdictResult } from "../verdict/types.js";
 import { appendCalibrationEntry } from "../calibration/log.js";
+import { resolveSpecFromJobId } from "../marketplace/resolve-spec.js";
 
 export const verifyRoute = new Hono();
 
 const ZERO_HASH = `sha256:${"0".repeat(64)}`;
 
 interface VerifyRequestBody {
+  jobId?: string;
   spec?: string;
   deliverable?: { onchain?: OnchainDeliverable; data?: DataDeliverable; code?: CodeDeliverable; content?: ContentDeliverable };
 }
@@ -66,6 +68,12 @@ async function handleVerify(c: Context) {
     const body = await c.req.json<VerifyRequestBody>();
     if (typeof body?.spec === "string") rawSpec = body.spec;
     if (body?.deliverable && typeof body.deliverable === "object") rawDeliverable = body.deliverable;
+    // `jobId` is the marketplace-friendly alternative to hand-transcribing `spec` - resolved from
+    // the task's own public record (see resolve-spec.ts). An explicit `spec` always wins if both
+    // are present, so existing callers (scripts/test-buyer.ts) are unaffected.
+    if (!rawSpec && typeof body?.jobId === "string" && body.jobId) {
+      rawSpec = (await resolveSpecFromJobId(body.jobId)) ?? "";
+    }
   } catch {
     // no/invalid JSON body - treat as no spec/deliverable, criteria[] stays empty below.
   }
