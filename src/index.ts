@@ -1,11 +1,21 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { existsSync, readFileSync } from "node:fs";
+import { setDefaultResultOrder } from "node:dns";
 import { resolve } from "node:path";
 import { Hono } from "hono";
 import { config } from "./config.js";
 import { verifyRoute } from "./routes/verify.js";
 import { demoRoute } from "./routes/demo.js";
+
+// Node's fetch (undici) resolves IPv6 first by default; in this environment (and observed live
+// on at least one deployment target) that IPv6 route to some hosts (e.g. openrouter.ai, used by
+// m2-criteria-compiler.ts) hangs and times out (ETIMEDOUT) before ever falling back to a working
+// IPv4 route - confirmed live: a plain `curl` to the same host succeeded every time (curl
+// defaults differently), only Node's own fetch-based clients failed, intermittently. Forcing
+// IPv4-first here fixes it at the source rather than depending on a NODE_OPTIONS env var being
+// set correctly on every deployment target.
+setDefaultResultOrder("ipv4first");
 
 const app = new Hono();
 app.get("/health", (c) => c.json({ ok: true }));

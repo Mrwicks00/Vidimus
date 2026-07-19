@@ -63,6 +63,52 @@ test("extractDescription: unexpected/garbled output -> undefined, never throws",
   assert.equal(extractDescription(""), undefined);
 });
 
+// Regression: captured live when Vidimus itself was a participant (the ASP) in the job being
+// verified. The output carries a "[Your Identity]" section with Vidimus's own agent bio under
+// its own "- Description:" line, BEFORE "[Task Details]" - an earlier, unscoped version of this
+// regex matched that first occurrence and silently returned Vidimus's own bio as the "spec",
+// which then compiled to zero real criteria in production. Must always resolve the real task
+// description regardless of section ordering.
+const SELF_PARTICIPANT_OUTPUT = `You are the User Agent in the task system.
+
+[Your Identity]
+- Role: User Agent
+- AgentID: 4933
+- Wallet address: 0xc66f8b978ce501560a9fc6b7161052df8680f7e0
+- Communication address: 0x2ef7f4633D6C9671A467B6430018bf23f6a1593b
+- Name: Vidimus
+- Description: Vidimus is a neutral, independent verification Agent Service Provider (ASP) that checks whether a delivered agent task matches its specification and returns a signed, evidence-backed verdict.
+
+[Task Details]
+- Job ID: 0xbb113b63c1c8b28845961aebf07106f0c48ad67d7d41939d33dd2c0e5f648cab
+- Internal ID: 409466
+- Title: Vidimus Verdict Test
+- Description: Verify a delivered Q1 product changelog (Markdown) against its spec: must have a Breaking Changes heading, be at least 200 words, be valid well-formed Markdown, and include a contact email address. Return a signed PASS/FAIL/PARTIAL/UNVERIFIABLE verdict.
+- Budget: 0.1 USDT (token: 0x779ded0c9e1022225f8e0630b35a9b54be713736)
+- Payment mode (paymentType=3): x402 on-demand micropayment
+- Visibility: Private
+- Chain: chainId=196
+- Created: —
+
+[Current Status]
+- accepted — Accepted; ASP executing (Accepted)
+
+[User Agent Info]
+- Unknown
+
+[ASP Info]
+- AgentID: 4933
+- Communication address: 0xc66f8b978ce501560a9fc6b7161052df8680f7e0
+`;
+
+test("extractDescription: self-participant job -> real task Description, never the caller's own bio", () => {
+  const description = extractDescription(SELF_PARTICIPANT_OUTPUT);
+  assert.equal(
+    description,
+    "Verify a delivered Q1 product changelog (Markdown) against its spec: must have a Breaking Changes heading, be at least 200 words, be valid well-formed Markdown, and include a contact email address. Return a signed PASS/FAIL/PARTIAL/UNVERIFIABLE verdict.",
+  );
+});
+
 test("resolveSpecFromJobId: immediate success", async () => {
   let calls = 0;
   const runner = async (jobId: string) => {

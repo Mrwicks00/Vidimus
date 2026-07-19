@@ -164,11 +164,27 @@ export function assignLocators(methods: (Method | null)[]): (ClaimLocator | unde
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const COMPILE_MAX_ATTEMPTS = 3;
+const COMPILE_RETRY_DELAY_MS = 500;
+
 /**
  * Spec-only input. Never pass deliverable content here (ARCHITECTURE.md §3 invariant).
  * `canary` is a per-job secret minted by `quarantineSpec` (src/security/quarantine.ts) - if it
  * ever appears in the model's output, the spec successfully instructed the model to do
  * something it was told never to do, which is the live signal that an injection succeeded.
+ *
+ * Retries transient failures - both real network/timeout errors (observed live: OpenRouter's
+ * free tier is not perfectly reliable) and the model producing output that fails our own
+ * post-parse validation (observed live: the free model sometimes tags a criterion INFERRED
+ * without an inference_note, violating the system prompt's explicit rule - often a one-off
+ * sampling issue, not a deterministic failure, so a fresh attempt frequently succeeds). Never
+ * retries `InjectionSuspectedError` - a tripped canary is a security signal, not a transient
+ * fault; retrying to "get a clean sample" past a suspected injection would defeat the point of
+ * detecting it at all.
  */
 export async function compileCriteria(
   specText: string,
@@ -180,6 +196,20 @@ export async function compileCriteria(
     throw new Error("compileCriteria: spec text is empty");
   }
 
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= COMPILE_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await compileCriteriaOnce(trimmed, canary, options);
+    } catch (err) {
+      if (err instanceof InjectionSuspectedError) throw err;
+      lastError = err;
+      if (attempt < COMPILE_MAX_ATTEMPTS) await sleep(COMPILE_RETRY_DELAY_MS * attempt);
+    }
+  }
+  throw lastError;
+}
+
+async function compileCriteriaOnce(trimmed: string, canary: string, options: CompileCriteriaOptions): Promise<Criterion[]> {
   const completion = await openrouter.chat.completions.parse({
     model: options.model ?? DEFAULT_MODEL,
     max_tokens: 8000,

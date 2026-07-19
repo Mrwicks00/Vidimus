@@ -25,10 +25,21 @@ function sleep(ms: number): Promise<void> {
 // fixed template shape; the description itself may span multiple lines/paragraphs, so capture
 // through to the next top-level "- <Field>:" line (observed live: "- Title: ...", "- Description:
 // <n paragraphs>", "- Budget: ..." - description content itself never starts a line with "- Word:").
+//
+// MUST be scoped to the "[Task Details]" section first: when the caller (Vidimus, agentId
+// resolved from config) happens to itself be a participant in the job being verified (e.g. it's
+// both the ASP being asked to verify a spec AND running this lookup), the output *also* carries
+// a "[Your Identity]" section with its own unrelated "- Description:" line (the caller's own
+// agent bio) BEFORE "[Task Details]" - confirmed live, this silently returned Vidimus's own bio
+// instead of the task spec until this scoping was added. Never match the first "- Description:"
+// in the whole output.
+const TASK_DETAILS_SECTION = /\[Task Details\]([\s\S]*?)(?:\n\[|$)/;
 const DESCRIPTION_BLOCK = /^- Description:[ \t]*\n?([\s\S]*?)\n- [A-Za-z ]+:/m;
 
 export function extractDescription(commonContextOutput: string): string | undefined {
-  const match = DESCRIPTION_BLOCK.exec(commonContextOutput);
+  const section = TASK_DETAILS_SECTION.exec(commonContextOutput)?.[1];
+  if (!section) return undefined;
+  const match = DESCRIPTION_BLOCK.exec(section);
   const text = match?.[1]?.trim();
   return text ? text : undefined;
 }
