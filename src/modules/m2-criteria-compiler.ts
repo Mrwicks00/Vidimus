@@ -4,8 +4,8 @@
 // deliverable never reaches this module). Output: an ordered Criterion[], every item
 // tagged EXPLICIT/INFERRED and tiered, produced before any verification runs - so every
 // criterion comes back UNVERIFIABLE with no evidence. Checkers (D3+) fill in real results.
-import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import OpenAI from "openai";
+import { zodResponseFormat } from "openai/helpers/zod";
 import { z } from "zod";
 import { config } from "../config.js";
 import {
@@ -17,7 +17,14 @@ import {
   type Method,
 } from "../verdict/types.js";
 
-const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+// Routed through OpenRouter (openai-sdk-compatible), not the direct Anthropic API - the direct
+// Anthropic key ran out of credit with no budget to top up (same root cause render-start.sh
+// already worked around for the A2A daemon's auto-reply, via NVIDIA NIM). Default model is a
+// free OpenRouter listing chosen for reliable structured-output support and >10B active params
+// (OpenRouter's own `supported_parameters` metadata confirms structured_outputs support - see
+// https://openrouter.ai/api/v1/models) - smaller free models were unreliable at the strict
+// tier/method JSON schema this module depends on.
+const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1" });
 
 const METHOD_NAMES = Object.keys(METHOD_REGISTRY) as [Method, ...Method[]];
 
@@ -119,6 +126,8 @@ export interface CompileCriteriaOptions {
   model?: string;
 }
 
+const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+
 // SECURITY.md §3: a canary that must never appear in extractor output. Thrown, not swallowed -
 // the route layer treats this as "job compromised" and overrides the whole verdict to
 // UNVERIFIABLE, never lets the (possibly-manipulated) compiled criteria stand.
@@ -171,24 +180,20 @@ export async function compileCriteria(
     throw new Error("compileCriteria: spec text is empty");
   }
 
-  const message = await anthropic.messages.parse({
-    model: options.model ?? "claude-opus-4-8",
+  const completion = await openrouter.chat.completions.parse({
+    model: options.model ?? DEFAULT_MODEL,
     max_tokens: 8000,
-    thinking: { type: "adaptive" },
-    output_config: {
-      effort: "high",
-      format: zodOutputFormat(CompilerOutput),
-    },
-    system: buildSystemPrompt(canary),
     messages: [
+      { role: "system", content: buildSystemPrompt(canary) },
       {
         role: "user",
         content: `<order_spec>\n${trimmed}\n</order_spec>\n\nCompile this spec into criteria per the rules above.`,
       },
     ],
+    response_format: zodResponseFormat(CompilerOutput, "compiler_output"),
   });
 
-  const draft = message.parsed_output;
+  const draft = completion.choices[0]?.message?.parsed;
   if (!draft) {
     throw new Error("compileCriteria: model returned no parseable structured output");
   }

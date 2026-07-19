@@ -6,8 +6,16 @@
 import { readFileSync } from "node:fs";
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
-import { config } from "../src/config.js";
 import { buildSystemPrompt, CompilerOutput } from "../src/modules/m2-criteria-compiler.js";
+
+// Direct Anthropic key, read separately from src/config.js - compileCriteria() itself moved to
+// OpenRouter (see m2-criteria-compiler.ts) once the direct Anthropic key ran out of credit, but
+// this diagnostic still measures real Opus 4.8 pricing/margin for whenever real budget exists.
+function requiredAnthropicApiKey(): string {
+  const value = process.env.ANTHROPIC_API_KEY;
+  if (!value) throw new Error("Missing required env var: ANTHROPIC_API_KEY");
+  return value;
+}
 
 const OPUS_4_8_INPUT_PER_MTOK = 5.0;
 const OPUS_4_8_OUTPUT_PER_MTOK = 25.0;
@@ -17,7 +25,7 @@ async function main() {
   const spec = readFileSync(specPath, "utf8").trim();
   const canary = `measure-${Date.now()}`;
 
-  const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
+  const anthropic = new Anthropic({ apiKey: requiredAnthropicApiKey() });
   const message = await anthropic.messages.parse({
     model: "claude-opus-4-8",
     max_tokens: 8000,

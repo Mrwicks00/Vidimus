@@ -20,7 +20,9 @@ export const config = {
   priceAtomic: BigInt(process.env.PRICE_ATOMIC ?? "100000"),
   erc8004Id: process.env.ERC8004_ID ?? "",
   erc8004Address: (process.env.ERC8004_ADDRESS ?? "") as `0x${string}` | "",
-  anthropicApiKey: required("ANTHROPIC_API_KEY"),
+  // M2 criteria compiler backend: OpenRouter (openai-sdk-compatible), not the direct Anthropic
+  // API - see m2-criteria-compiler.ts for why (Anthropic credit exhaustion, no budget to top up).
+  openrouterApiKey: required("OPENROUTER_API_KEY"),
   // D6.B calibration log (docs/ARCHITECTURE.md §5) - append-only JSONL, not committed to git
   // (runtime state, not source - see .gitignore).
   calibrationLogPath: process.env.CALIBRATION_LOG_PATH ?? "data/calibration-log.jsonl",
