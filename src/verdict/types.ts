@@ -81,11 +81,19 @@ export function isCodeMethod(method: Method | null): method is CodeMethod {
 // per-method claim arrays the same way onchain/data/code claims address into their own buckets.
 // Same grammar, new bucket. Replaces the earlier single `content.countable` stub (D6.A design
 // gate, 2026-07-11) - see docs/VERIFICATION_MODULES.md M4.
+//
+// The last three (coverage/source_grounding/no_hallucination) are the Tier-2 grounded-judgment
+// methods (docs/VERIFICATION_MODULES.md M4 "Tier-2") - widening this union is the only change
+// needed to make M2 assign them a locator; assignLocators/isLocatableMethod pick them up
+// automatically (this is the exact extension point that comment predicted).
 export const CONTENT_METHODS = [
   "content.presence",
   "content.format",
   "content.bounds",
   "content.pattern",
+  "content.coverage",
+  "content.source_grounding",
+  "content.no_hallucination",
 ] as const satisfies readonly Method[];
 
 export type ContentMethod = (typeof CONTENT_METHODS)[number];

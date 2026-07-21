@@ -24,12 +24,15 @@ import {
   CONTENT_PATTERNS,
   type ContentAsset,
   type ContentBoundsClaim,
+  type ContentCoverageClaim,
   type ContentDeliverableSealed,
   type ContentFactSet,
   type ContentFormat,
   type ContentFormatClaim,
+  type ContentNoHallucinationClaim,
   type ContentPatternClaim,
   type ContentPresenceClaim,
+  type ContentSourceGroundingClaim,
 } from "../modules/m3-content.js";
 import type { Method } from "../verdict/types.js";
 
@@ -618,11 +621,35 @@ const ContentPatternClaimSchema = z.strictObject({
   pattern: z.enum(Object.keys(CONTENT_PATTERNS) as [string, ...string[]]),
 });
 
+// Tier-2 grounded-judgment claims (docs/VERIFICATION_MODULES.md M4 "Tier-2") - the required
+// topics for content.coverage come from the criterion's own compiled `text`, not a buyer-
+// declared field, so its claim shape carries nothing but the asset to check. citedUrls/
+// sourceUrls are capped at 5 - a DoS guard against a claim demanding an unbounded number of
+// live fetches (src/security/source-fetch.ts), same spirit as MAX_CLAIMS_PER_METHOD.
+const MAX_SOURCE_URLS = 5;
+
+const ContentCoverageClaimSchema = z.strictObject({
+  assetId: z.string().min(1).max(128),
+});
+
+const ContentSourceGroundingClaimSchema = z.strictObject({
+  assetId: z.string().min(1).max(128),
+  citedUrls: z.array(z.url()).min(1).max(MAX_SOURCE_URLS),
+});
+
+const ContentNoHallucinationClaimSchema = z.strictObject({
+  assetId: z.string().min(1).max(128),
+  sourceUrls: z.array(z.url()).max(MAX_SOURCE_URLS).optional(),
+});
+
 const CONTENT_CLAIM_SCHEMAS = {
   "content.presence": ContentPresenceClaimSchema,
   "content.format": ContentFormatClaimSchema,
   "content.bounds": ContentBoundsClaimSchema,
   "content.pattern": ContentPatternClaimSchema,
+  "content.coverage": ContentCoverageClaimSchema,
+  "content.source_grounding": ContentSourceGroundingClaimSchema,
+  "content.no_hallucination": ContentNoHallucinationClaimSchema,
 } as const;
 
 type ContentMethodKey = keyof typeof CONTENT_CLAIM_SCHEMAS;
@@ -724,6 +751,9 @@ export function quarantineContentDeliverable(raw: unknown): {
     "content.format": sealedClaims["content.format"] as ContentFormatClaim[] | undefined,
     "content.bounds": sealedClaims["content.bounds"] as ContentBoundsClaim[] | undefined,
     "content.pattern": sealedClaims["content.pattern"] as ContentPatternClaim[] | undefined,
+    "content.coverage": sealedClaims["content.coverage"] as ContentCoverageClaim[] | undefined,
+    "content.source_grounding": sealedClaims["content.source_grounding"] as ContentSourceGroundingClaim[] | undefined,
+    "content.no_hallucination": sealedClaims["content.no_hallucination"] as ContentNoHallucinationClaim[] | undefined,
   };
   return { sealed, rejected };
 }

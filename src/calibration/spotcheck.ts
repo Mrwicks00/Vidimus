@@ -95,7 +95,10 @@ export async function spotCheckCriterion(entry: CalibrationCriterionEntry, rawDe
   }
   if (isContentMethod(method)) {
     const { sealed, rejected } = quarantineContentDeliverable(rawDeliverable.content);
-    const [result] = applyContentChecks(criteria, sealed, rejected);
+    // Tier-2 content methods never reach here - the `entry.tier !== 1` guard above already
+    // returned. Tier-1 content checkers never read `canary` at all, so the empty string is
+    // inert; there's no real per-job canary to reuse in this M2-bypassing spot-check path.
+    const [result] = await applyContentChecks(criteria, sealed, rejected, "");
     return { ...base, recomputed_result: result!.result, matches: result!.result === entry.result };
   }
   return { ...base, recomputed_result: "N/A", matches: false, skipped_reason: `method ${method} has no known Tier-1 dispatcher` };

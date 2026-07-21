@@ -1,24 +1,33 @@
-// M4 Tier-1 content checkers. docs/VERIFICATION_MODULES.md M4, scope locked to this session's
-// brief (docs/ROADMAP.md D6.A - Tier-1 content only; Tier-2 grounded checks and the calibration
-// log are D6.B, not touched here). `content.presence`, `content.format`, `content.bounds`,
-// `content.pattern` - every one confidence 1.0, mechanical, no semantic/quality/topicality
-// judgment (that hard line is what keeps this Tier 1, per CLAUDE.md L4).
+// M4 content checkers - Tier-1 mechanical (docs/ROADMAP.md D6.A) plus Tier-2 grounded judgments
+// (docs/VERIFICATION_MODULES.md M4 "Tier-2"). `content.presence`, `content.format`,
+// `content.bounds`, `content.pattern` are confidence 1.0, mechanical, no semantic/quality/
+// topicality judgment (that hard line is what keeps them Tier 1, per CLAUDE.md L4).
+// `content.coverage`, `content.source_grounding`, `content.no_hallucination` are Tier-2: real
+// semantic judgment over the asset text (and, for the latter two, fetched sources), calibrated
+// confidence instead of a flat 1.0, every non-UNVERIFIABLE result carrying `evidence.kind =
+// "source_check"` with a concrete pointer per that doc's own requirement.
 //
 // Same claim-addressing grammar as M3.A/B/C (docs/VERDICT_SPEC.md §2.2): a criterion's `locator`
 // points at `deliverable.content[method][index]`. This module only resolves locators whose
-// `method` is a ContentMethod - onchain/data/code locators pass through untouched, so all four
+// `method` is a ContentMethod - onchain/data/code locators pass through untouched, so all seven
 // checkers compose over the same criteria[] array without stepping on each other (see
 // src/routes/verify.ts).
 //
-// Extraction boundary: mirrors m3-data.ts. Pass-1 structural extraction (word/line/section
-// counts, heading list, JSON parse, CSV header parse) happens once in
+// Extraction boundary: mirrors m3-data.ts for the Tier-1 four. Pass-1 structural extraction
+// (word/line/section counts, heading list, JSON parse, CSV header parse) happens once in
 // src/security/quarantine.ts's `extractContentAsset`, producing a `ContentFactSet` that crosses
 // the seal - this module never re-parses raw bytes into a *different* structural interpretation
 // than what quarantine already computed, it only reads the FactSet's precomputed fields (plus
-// `raw` for literal/pattern substring search, which is inert data handed to non-instructable
-// mechanical tools - regex/string search - never executed or instruction-followed).
+// `raw` for literal/pattern substring search and as the Tier-2 checkers' LLM-extraction input,
+// both inert data, never executed or instruction-followed). The Tier-2 checkers additionally
+// touch the network (src/security/source-fetch.ts, itself SSRF-guarded) and an LLM
+// (src/modules/m4-content-grounding.ts, canary-protected same as M2) - this is why
+// `applyContentChecks` is async, unlike its Tier-1-only predecessor.
 import { isContentMethod, type Criterion, type Evidence } from "../verdict/types.js";
 import type { QuarantineRejection } from "../security/quarantine.js";
+import { fetchSourceText } from "../security/source-fetch.js";
+import { extractCoverage, extractGrounding, type GroundingClaimResult, type GroundingSource } from "./m4-content-grounding.js";
+import { InjectionSuspectedError } from "./m2-criteria-compiler.js";
 
 function evidence(kind: Evidence["kind"], ref: string, detail: string): Evidence {
   return { kind, ref, detail: detail.slice(0, 500) };
@@ -26,6 +35,15 @@ function evidence(kind: Evidence["kind"], ref: string, detail: string): Evidence
 
 function withResult(c: Criterion, result: Criterion["result"], ev: Evidence): Criterion {
   return { ...c, result, confidence: result === "UNVERIFIABLE" ? null : 1.0, evidence: ev };
+}
+
+// Tier-2 variant of withResult: confidence is the model's own calibrated float (docs/
+// VERIFICATION_MODULES.md's "Tier 2: (0,1), calibrated"), not a hardcoded 1.0 - used only by
+// content.coverage, whose extraction schema actually emits one. source_grounding/
+// no_hallucination aggregate discrete per-claim booleans instead (see their checkers below), so
+// they reuse the plain withResult like the Tier-1 four.
+function withTier2Result(c: Criterion, result: Criterion["result"], confidence: number, ev: Evidence): Criterion {
+  return { ...c, result, confidence: result === "UNVERIFIABLE" ? null : confidence, evidence: ev };
 }
 
 function unverifiable(c: Criterion, detail: string): Criterion {
@@ -86,12 +104,34 @@ export interface ContentPatternClaim {
   pattern: ContentPatternName;
 }
 
+// Tier-2 claim shapes (docs/VERIFICATION_MODULES.md M4 "Tier-2"). content.coverage carries
+// nothing but the asset to check - the required topic comes from the criterion's own compiled
+// `text`, not a buyer-declared field. source_grounding/no_hallucination declare the URL(s) to
+// fetch (src/security/source-fetch.ts) - never auto-discovered from the untrusted asset text
+// itself.
+export interface ContentCoverageClaim {
+  assetId: string;
+}
+
+export interface ContentSourceGroundingClaim {
+  assetId: string;
+  citedUrls: string[];
+}
+
+export interface ContentNoHallucinationClaim {
+  assetId: string;
+  sourceUrls?: string[]; // omitted -> UNVERIFIABLE, honestly, no ground truth to check against
+}
+
 export interface ContentDeliverable {
   content?: ContentAsset[];
   "content.presence"?: ContentPresenceClaim[];
   "content.format"?: ContentFormatClaim[];
   "content.bounds"?: ContentBoundsClaim[];
   "content.pattern"?: ContentPatternClaim[];
+  "content.coverage"?: ContentCoverageClaim[];
+  "content.source_grounding"?: ContentSourceGroundingClaim[];
+  "content.no_hallucination"?: ContentNoHallucinationClaim[];
 }
 
 // ---- Pass-1 extraction output (crosses the seal - produced by
@@ -117,6 +157,9 @@ export interface ContentDeliverableSealed {
   "content.format"?: ContentFormatClaim[];
   "content.bounds"?: ContentBoundsClaim[];
   "content.pattern"?: ContentPatternClaim[];
+  "content.coverage"?: ContentCoverageClaim[];
+  "content.source_grounding"?: ContentSourceGroundingClaim[];
+  "content.no_hallucination"?: ContentNoHallucinationClaim[];
 }
 
 function findContentAsset(assets: ContentFactSet[], id: string): ContentFactSet | undefined {
@@ -315,37 +358,184 @@ export function checkPattern(c: Criterion, claim: ContentPatternClaim, assets: C
   );
 }
 
+// ---- content.coverage ----
+
+// Below this confidence, the model's own covered/not-covered call isn't reliable enough to
+// score either way - UNVERIFIABLE, never a low-confidence guess dressed up as PASS/FAIL.
+const COVERAGE_CONFIDENCE_FLOOR = 0.5;
+
+export async function checkCoverage(c: Criterion, claim: ContentCoverageClaim, assets: ContentFactSet[], canary: string): Promise<Criterion> {
+  const asset = findContentAsset(assets, claim.assetId);
+  if (!asset) {
+    return unverifiable(c, `content.coverage: referenced content "${claim.assetId}" was not delivered or was rejected at quarantine`);
+  }
+
+  let result;
+  try {
+    result = await extractCoverage(asset.raw, c.text, canary);
+  } catch (err) {
+    if (err instanceof InjectionSuspectedError) throw err;
+    return unverifiable(c, `content.coverage: extraction failed - ${err instanceof Error ? err.message : "unknown error"}`);
+  }
+
+  if (result.confidence < COVERAGE_CONFIDENCE_FLOOR) {
+    return unverifiable(c, `content.coverage: extraction confidence too low (${result.confidence.toFixed(2)}) to score reliably`);
+  }
+  return withTier2Result(
+    c,
+    result.covered ? "PASS" : "FAIL",
+    result.confidence,
+    evidence("source_check", `content:${asset.id}`, result.evidencePassage ?? `content ${asset.id} does not appear to cover: ${c.text}`),
+  );
+}
+
+// ---- content.source_grounding / content.no_hallucination shared plumbing ----
+
+interface FetchedSources {
+  reachable: GroundingSource[];
+  unreachableUrls: string[];
+}
+
+async function fetchAll(urls: string[]): Promise<FetchedSources> {
+  const results = await Promise.all(urls.map(async (url) => ({ url, result: await fetchSourceText(url) })));
+  const reachable: GroundingSource[] = [];
+  const unreachableUrls: string[] = [];
+  for (const { url, result } of results) {
+    if (result.ok) reachable.push({ url, text: result.text });
+    else unreachableUrls.push(`${url} (${result.reason})`);
+  }
+  return { reachable, unreachableUrls };
+}
+
+function summarizeGrounding(claims: GroundingClaimResult[]): { grounded: number; contradicted: GroundingClaimResult[] } {
+  return { grounded: claims.filter((cl) => cl.supported === true).length, contradicted: claims.filter((cl) => cl.supported === false) };
+}
+
+// ---- content.source_grounding ----
+
+export async function checkSourceGrounding(c: Criterion, claim: ContentSourceGroundingClaim, assets: ContentFactSet[], canary: string): Promise<Criterion> {
+  const asset = findContentAsset(assets, claim.assetId);
+  if (!asset) {
+    return unverifiable(c, `content.source_grounding: referenced content "${claim.assetId}" was not delivered or was rejected at quarantine`);
+  }
+
+  const { reachable, unreachableUrls } = await fetchAll(claim.citedUrls);
+  if (unreachableUrls.length > 0) {
+    // A cited source that doesn't exist/can't be reached is the failure mode this method exists
+    // to catch - report it directly, don't silently drop it and grade only what did resolve.
+    return withResult(c, "FAIL", evidence("source_check", `content:${asset.id}`, `cited source(s) unreachable: ${unreachableUrls.join("; ")}`));
+  }
+
+  let claims: GroundingClaimResult[];
+  try {
+    claims = await extractGrounding(asset.raw, reachable, canary);
+  } catch (err) {
+    if (err instanceof InjectionSuspectedError) throw err;
+    return unverifiable(c, `content.source_grounding: extraction failed - ${err instanceof Error ? err.message : "unknown error"}`);
+  }
+  if (claims.length === 0) {
+    return unverifiable(c, `content.source_grounding: no citation-backed claim found in content ${asset.id} to check`);
+  }
+
+  const { grounded, contradicted } = summarizeGrounding(claims);
+  if (contradicted.length > 0) {
+    return withResult(c, "FAIL", evidence("source_check", `content:${asset.id}`, `contradicted by cited source(s): ${contradicted.map((cl) => cl.text).join("; ")}`));
+  }
+  const allGrounded = grounded === claims.length;
+  return withResult(
+    c,
+    allGrounded ? "PASS" : "PARTIAL",
+    evidence("source_check", `content:${asset.id}`, `${grounded}/${claims.length} claim(s) supported by the cited source(s)`),
+  );
+}
+
+// ---- content.no_hallucination ----
+
+export async function checkNoHallucination(c: Criterion, claim: ContentNoHallucinationClaim, assets: ContentFactSet[], canary: string): Promise<Criterion> {
+  const asset = findContentAsset(assets, claim.assetId);
+  if (!asset) {
+    return unverifiable(c, `content.no_hallucination: referenced content "${claim.assetId}" was not delivered or was rejected at quarantine`);
+  }
+  if (!claim.sourceUrls || claim.sourceUrls.length === 0) {
+    return unverifiable(c, `content.no_hallucination: no source provided to ground claims against`);
+  }
+
+  const { reachable, unreachableUrls } = await fetchAll(claim.sourceUrls);
+  if (reachable.length === 0) {
+    return unverifiable(c, `content.no_hallucination: none of the provided source(s) were reachable: ${unreachableUrls.join("; ")}`);
+  }
+
+  let claims: GroundingClaimResult[];
+  try {
+    claims = await extractGrounding(asset.raw, reachable, canary);
+  } catch (err) {
+    if (err instanceof InjectionSuspectedError) throw err;
+    return unverifiable(c, `content.no_hallucination: extraction failed - ${err instanceof Error ? err.message : "unknown error"}`);
+  }
+  if (claims.length === 0) {
+    return unverifiable(c, `content.no_hallucination: no factual claim found in content ${asset.id} to check`);
+  }
+
+  const { grounded, contradicted } = summarizeGrounding(claims);
+  if (contradicted.length > 0) {
+    return withResult(c, "FAIL", evidence("source_check", `content:${asset.id}`, `invented/contradicted claim(s): ${contradicted.map((cl) => cl.text).join("; ")}`));
+  }
+  const allGrounded = grounded === claims.length;
+  return withResult(
+    c,
+    allGrounded ? "PASS" : "PARTIAL",
+    evidence("source_check", `content:${asset.id}`, `${grounded}/${claims.length} claim(s) grounded in the provided source(s)`),
+  );
+}
+
 // ---- dispatch ----
 
-// D6.A: dispatches every criterion whose locator addresses a ContentMethod - onchain/data/code
+// Dispatches every criterion whose locator addresses a ContentMethod - onchain/data/code
 // locators pass through untouched (m3-onchain.ts / m3-data.ts / m3-code.ts handle those in the
-// same pipeline, see src/routes/verify.ts).
-export function applyContentChecks(criteria: Criterion[], sealed: ContentDeliverableSealed | undefined, rejections: QuarantineRejection[]): Criterion[] {
+// same pipeline, see src/routes/verify.ts). Async (unlike the Tier-1-only predecessor) because
+// the Tier-2 checkers touch the network and an LLM. `canary` is the same per-job secret
+// compileCriteria already used (src/routes/verify.ts) - reused, not re-minted, since the
+// security property (never echo it) doesn't depend on which untrusted surface carried the
+// injection attempt.
+export async function applyContentChecks(
+  criteria: Criterion[],
+  sealed: ContentDeliverableSealed | undefined,
+  rejections: QuarantineRejection[],
+  canary: string,
+): Promise<Criterion[]> {
   const rejectionByKey = new Map(rejections.map((r) => [`${r.method}[${r.index}]`, r]));
   const assets = sealed?.content ?? [];
 
-  return criteria.map((c) => {
-    const locator = c.locator;
-    if (!locator || !isContentMethod(locator.method)) return c;
-    const method = locator.method;
-    const index = locator.index;
-    const rejection = rejectionByKey.get(`${method}[${index}]`);
-    if (rejection) {
-      return unverifiable(c, rejection.reason);
-    }
-    const claim = sealed?.[method]?.[index];
-    if (!claim) {
-      return unverifiable(c, `locator did not resolve: no ${method} claim submitted at ${method}[${index}]`);
-    }
-    switch (method) {
-      case "content.presence":
-        return checkPresence(c, claim as ContentPresenceClaim, assets);
-      case "content.format":
-        return checkFormat(c, claim as ContentFormatClaim, assets);
-      case "content.bounds":
-        return checkBounds(c, claim as ContentBoundsClaim, assets);
-      case "content.pattern":
-        return checkPattern(c, claim as ContentPatternClaim, assets);
-    }
-  });
+  return Promise.all(
+    criteria.map(async (c): Promise<Criterion> => {
+      const locator = c.locator;
+      if (!locator || !isContentMethod(locator.method)) return c;
+      const method = locator.method;
+      const index = locator.index;
+      const rejection = rejectionByKey.get(`${method}[${index}]`);
+      if (rejection) {
+        return unverifiable(c, rejection.reason);
+      }
+      const claim = sealed?.[method]?.[index];
+      if (!claim) {
+        return unverifiable(c, `locator did not resolve: no ${method} claim submitted at ${method}[${index}]`);
+      }
+      switch (method) {
+        case "content.presence":
+          return checkPresence(c, claim as ContentPresenceClaim, assets);
+        case "content.format":
+          return checkFormat(c, claim as ContentFormatClaim, assets);
+        case "content.bounds":
+          return checkBounds(c, claim as ContentBoundsClaim, assets);
+        case "content.pattern":
+          return checkPattern(c, claim as ContentPatternClaim, assets);
+        case "content.coverage":
+          return checkCoverage(c, claim as ContentCoverageClaim, assets, canary);
+        case "content.source_grounding":
+          return checkSourceGrounding(c, claim as ContentSourceGroundingClaim, assets, canary);
+        case "content.no_hallucination":
+          return checkNoHallucination(c, claim as ContentNoHallucinationClaim, assets, canary);
+      }
+    }),
+  );
 }

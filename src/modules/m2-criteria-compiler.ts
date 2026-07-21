@@ -92,6 +92,19 @@ ${Object.entries(METHOD_REGISTRY)
   .map(([m, t]) => `   - ${m} (tier ${t})`)
   .join("\n")}
    If no registered method fits, set method to null - do not invent a method name.
+   Content methods are easy to confuse - pick by what's actually being checked, not by "it's about \
+   a document": content.presence checks one specific, literally-named structural target exists \
+   (a heading, a json key, a csv column, an exact literal string) - use it only when the criterion \
+   names that exact target. content.coverage checks whether prose actually addresses/covers a \
+   described topic or point in substance - use it when the criterion is about a topic being \
+   discussed, not an exact string appearing. content.source_grounding checks whether a specific \
+   cited source exists and supports the claim citing it - use only when the criterion is about a \
+   citation/source being valid. content.no_hallucination checks whether factual claims in the \
+   delivered text are grounded in a separately-provided source at all - use for "don't make things \
+   up" style requirements. Example: "the report must mention the Q3 numbers" -> content.presence \
+   (an exact literal/heading target); "the report must adequately explain the Q3 slowdown" -> \
+   content.coverage (a topic, not an exact string); "claims in the report must be backed by the \
+   cited sources" -> content.source_grounding.
 5. Do not skip ambiguous requirements. If the spec is too vague to compile responsibly, still emit a \
 criterion for it, tier it honestly, and leave method null so it is later marked UNVERIFIABLE with a \
 note on what the spec failed to specify. Never paper over ambiguity.

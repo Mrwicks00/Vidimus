@@ -128,7 +128,7 @@ async function handleVerify(c: Context) {
       criteria = await applyOnchainChecks(criteria, sealedOnchain, onchainRejected);
       criteria = await applyDataChecks(criteria, sealedData, dataRejected, deliverableHash);
       criteria = await applyCodeChecks(criteria, sealedCode, codeRejected);
-      criteria = applyContentChecks(criteria, sealedContent, contentRejected);
+      criteria = await applyContentChecks(criteria, sealedContent, contentRejected, quarantinedSpec.canary);
     } catch (err) {
       if (err instanceof InjectionSuspectedError) {
         // SECURITY.md §3: a tripped canary means the job is compromised input - do not emit

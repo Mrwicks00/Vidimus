@@ -61,9 +61,12 @@ test("assignLocators: independent counters per method, interleaved order", () =>
   ]);
 });
 
+// content.coverage/source_grounding/no_hallucination became locatable when M4 Tier-2 shipped
+// (widened CONTENT_METHODS, src/verdict/types.ts) - taste.refused (Tier 3, no locator scheme)
+// and method: null remain the non-locatable cases this test actually covers now.
 test("assignLocators: undefined for null method and for non-locatable methods", () => {
   const locators = assignLocators([null, "content.coverage", "onchain.owner_check", "taste.refused"]);
-  assert.deepEqual(locators, [undefined, undefined, { method: "onchain.owner_check", index: 0 }, undefined]);
+  assert.deepEqual(locators, [undefined, { method: "content.coverage", index: 0 }, { method: "onchain.owner_check", index: 0 }, undefined]);
 });
 
 // D5: assignLocators widened from onchain-only to isLocatableMethod (onchain | data) - same

@@ -47,7 +47,7 @@ function compiledCriterion(method: "content.presence" | "content.bounds" | "cont
 
 async function runRealChecker(c: Criterion): Promise<Criterion> {
   const { sealed, rejected } = quarantineContentDeliverable(rawDeliverable.content);
-  const [result] = applyContentChecks([c], sealed, rejected);
+  const [result] = await applyContentChecks([c], sealed, rejected, "");
   return result!;
 }
 

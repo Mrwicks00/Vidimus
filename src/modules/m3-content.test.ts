@@ -8,9 +8,12 @@ import assert from "node:assert/strict";
 import {
   applyContentChecks,
   checkBounds,
+  checkCoverage,
   checkFormat,
+  checkNoHallucination,
   checkPattern,
   checkPresence,
+  checkSourceGrounding,
   type ContentDeliverableSealed,
   type ContentFactSet,
 } from "./m3-content.js";
@@ -18,17 +21,15 @@ import { quarantineContentDeliverable } from "../security/quarantine.js";
 import type { Criterion } from "../verdict/types.js";
 
 let seq = 0;
-function criterion(method: Criterion["method"], index: number, source: Criterion["source"] = "EXPLICIT"): Criterion {
+function criterion(method: Criterion["method"], index: number, source: Criterion["source"] = "EXPLICIT", tier: Criterion["tier"] = 1): Criterion {
   seq += 1;
   return {
     id: `c${seq}`,
     text: "fixture criterion",
     source,
-    tier: 1,
+    tier,
     method,
-    locator: method
-      ? { method: method as "content.presence" | "content.format" | "content.bounds" | "content.pattern", index }
-      : undefined,
+    locator: method ? { method: method as NonNullable<Criterion["locator"]>["method"], index } : undefined,
     result: "UNVERIFIABLE",
     confidence: null,
     evidence: { kind: "none", ref: "", detail: "compiled, not yet verified" },
@@ -129,7 +130,7 @@ test("ADVERSARIAL: heading genuinely present in the document, but no content.pre
   const { sealed, rejected } = quarantineContentDeliverable(raw);
   assert.ok(sealed);
   assert.equal(sealed!.content[0]!.headings.includes("Risk Disclosure"), true, "sanity: the heading really is in the extracted FactSet");
-  const [result] = applyContentChecks([c], sealed, rejected);
+  const [result] = await applyContentChecks([c], sealed, rejected, "");
   assert.equal(result!.result, "UNVERIFIABLE", "must not guess PASS by reading the document itself - only the declared claim may be trusted");
   assert.equal(result!.evidence.kind, "none");
 });
@@ -203,21 +204,70 @@ test("content.pattern: vetted pattern match/no-match", () => {
   assert.equal(checkPattern(c, { assetId: "a1", pattern: "email" }, [withoutEmail]).result, "FAIL");
 });
 
+// ---- Tier-2: content.coverage / content.source_grounding / content.no_hallucination ----
+// Only the deterministic, network-free paths are covered here - live LLM/fetch calls are
+// exercised via the manual local-server check, same convention as m2-criteria-compiler.test.ts
+// keeping live model calls out of the default suite. Unreachable-URL cases below use a private/
+// loopback address specifically so source-fetch.ts's SSRF guard rejects them before any network
+// call, keeping these tests offline too.
+
+test("content.coverage: missing/unresolved asset -> UNVERIFIABLE, never a guess", async () => {
+  const c = criterion("content.coverage", 0, "EXPLICIT", 2);
+  const result = await checkCoverage(c, { assetId: "does-not-exist" }, [], "canary");
+  assert.equal(result.result, "UNVERIFIABLE");
+  assert.equal(result.confidence, null);
+});
+
+test("content.source_grounding: missing/unresolved asset -> UNVERIFIABLE, never a guess", async () => {
+  const c = criterion("content.source_grounding", 0, "EXPLICIT", 2);
+  const result = await checkSourceGrounding(c, { assetId: "does-not-exist", citedUrls: ["https://example.com/a"] }, [], "canary");
+  assert.equal(result.result, "UNVERIFIABLE");
+});
+
+test("content.source_grounding: unreachable cited URL -> FAIL, names the URL, never silently dropped", async () => {
+  const c = criterion("content.source_grounding", 0, "EXPLICIT", 2);
+  const asset = factSet({ id: "a1", format: "text", raw: "Per our source, the sky is blue." });
+  const result = await checkSourceGrounding(c, { assetId: "a1", citedUrls: ["http://127.0.0.1:1/unreachable"] }, [asset], "canary");
+  assert.equal(result.result, "FAIL");
+  assert.match(result.evidence.detail, /unreachable/);
+  assert.equal(result.evidence.kind, "source_check");
+});
+
+test("content.no_hallucination: missing/unresolved asset -> UNVERIFIABLE, never a guess", async () => {
+  const c = criterion("content.no_hallucination", 0, "EXPLICIT", 2);
+  const result = await checkNoHallucination(c, { assetId: "does-not-exist" }, [], "canary");
+  assert.equal(result.result, "UNVERIFIABLE");
+});
+
+test("content.no_hallucination: no sourceUrls provided -> UNVERIFIABLE, honestly, no ground truth given", async () => {
+  const c = criterion("content.no_hallucination", 0, "EXPLICIT", 2);
+  const asset = factSet({ id: "a1", format: "text", raw: "Some claims with no source attached." });
+  const result = await checkNoHallucination(c, { assetId: "a1" }, [asset], "canary");
+  assert.equal(result.result, "UNVERIFIABLE");
+});
+
+test("content.no_hallucination: all sourceUrls unreachable -> UNVERIFIABLE, not a guess in either direction", async () => {
+  const c = criterion("content.no_hallucination", 0, "EXPLICIT", 2);
+  const asset = factSet({ id: "a1", format: "text", raw: "Some claims citing an unreachable source." });
+  const result = await checkNoHallucination(c, { assetId: "a1", sourceUrls: ["http://127.0.0.1:1/unreachable"] }, [asset], "canary");
+  assert.equal(result.result, "UNVERIFIABLE");
+});
+
 // ---- dispatch / cross-family passthrough ----
 
-test("applyContentChecks: onchain/data/code-locator criteria pass through untouched", () => {
+test("applyContentChecks: onchain/data/code-locator criteria pass through untouched", async () => {
   const onchainCriterion = criterion("onchain.tx_exists", 0);
-  const result = applyContentChecks([onchainCriterion], undefined, []);
+  const result = await applyContentChecks([onchainCriterion], undefined, [], "");
   assert.deepEqual(result[0], onchainCriterion);
 });
 
-test("applyContentChecks: locator doesn't resolve (claim array present but short) -> UNVERIFIABLE, never FAIL", () => {
+test("applyContentChecks: locator doesn't resolve (claim array present but short) -> UNVERIFIABLE, never FAIL", async () => {
   const c = criterion("content.bounds", 1); // index 1, but only one claim will be sealed below
   const sealed: ContentDeliverableSealed = {
     content: [factSet({ id: "a1", format: "text", raw: "hello world" })],
     "content.bounds": [{ assetId: "a1", metric: "word_count", min: 1 }],
   };
-  const [result] = applyContentChecks([c], sealed, []);
+  const [result] = await applyContentChecks([c], sealed, [], "");
   assert.equal(result!.result, "UNVERIFIABLE");
 });
 

@@ -233,7 +233,7 @@ row-truncation prohibition, this cap can't hide fraud, it only trims log text).
 
 ---
 
-## M4 — CONTENT CONFORMANCE (Tier 2, plus Tier-1 mechanical checkers)  **Tier-1 shipped 2026-07-11 (Session 10, D6.A)**
+## M4 — CONTENT CONFORMANCE (Tier 2, plus Tier-1 mechanical checkers)  **Tier-1 shipped 2026-07-11 (Session 10, D6.A); Tier-2 shipped 2026-07-21**
 
 For prose/report/translation/documentation deliverables. This module straddles tiers — be
 strict about which check is which.
@@ -297,16 +297,41 @@ the matching `content.presence` claim, resolves UNVERIFIABLE, not PASS — the c
 freelance-searches the raw asset for what "seems" satisfied, it only resolves the declared
 claim (`src/modules/m3-content.test.ts`'s adversarial case).
 
-### Tier-2 grounded judgments (calibrated confidence, evidence-anchored — not yet built, D6.B+)
-- `content.coverage` — does it actually address each required topic/point from the spec?
-  Evidence = the passage that covers each point (or its absence).
-- `content.source_grounding` — do cited sources exist and support the claims that cite them?
-  Evidence = the fetched source + the supported/contradicted determination.
-- `content.no_hallucination` — are factual claims grounded rather than invented? Evidence =
-  which claims could be grounded and which couldn't.
+### Tier-2 grounded judgments (calibrated confidence, evidence-anchored — shipped this session)
 
-Every Tier-2 result **must** attach `evidence.kind = "source_check"` with a concrete pointer.
-A Tier-2 verdict with no inspectable evidence is a bug — demote to UNVERIFIABLE.
+Widening `CONTENT_METHODS` (`src/verdict/types.ts`) was the only change needed to make these
+locatable - `assignLocators`/`isLocatableMethod` picked them up automatically, the exact extension
+point that field was left for. M2's system prompt (`src/modules/m2-criteria-compiler.ts`) needed
+one addition, though: without explicit guidance the model defaulted every content criterion to
+`content.presence` (Tier 1) even when a Tier-2 method fit better - confirmed live before the fix,
+corrected by adding a short rule distinguishing "one exact structural target" (presence) from
+"a topic actually being addressed" (coverage) from "a citation being valid" (source_grounding).
+
+- `content.coverage` (`src/modules/m3-content.ts` `checkCoverage`) — does the asset actually
+  address the topic the criterion's own compiled `text` describes? A single LLM extraction call
+  (`src/modules/m4-content-grounding.ts` `extractCoverage`) reads the asset text and the
+  criterion's requirement text (both DATA, canary-protected same as M2) and returns
+  `covered`/`confidence`/`evidence_passage`. Below `COVERAGE_CONFIDENCE_FLOOR` (0.5) →
+  UNVERIFIABLE, never a low-confidence guess dressed up as PASS/FAIL.
+- `content.source_grounding` (`checkSourceGrounding`) — buyer declares `citedUrls`; each is
+  fetched via `src/security/source-fetch.ts` (SSRF-guarded: resolves the hostname itself,
+  rejects private/reserved ranges including cloud metadata addresses, re-validates every
+  redirect hop, size/timeout/content-type capped, retries transient network blips). Any
+  unreachable citation → FAIL outright (the failure mode this method exists to catch). All
+  reachable → `extractGrounding` (shared with no_hallucination) extracts claims and determines
+  per-claim support; any contradicted → FAIL, all supported → PASS, otherwise PARTIAL.
+- `content.no_hallucination` (`checkNoHallucination`) — buyer optionally declares `sourceUrls`
+  to ground claims against; omitted (or all unreachable) → UNVERIFIABLE, honestly - no ground
+  truth to check against, never a guess in either direction. Otherwise the same
+  `extractGrounding` call, aggregated as `grounded/total` claims; any contradicted → FAIL.
+
+Every Tier-2 result **must** attach `evidence.kind = "source_check"` with a concrete pointer
+(a quoted passage, or the fetched URL + support determination). A Tier-2 verdict with no
+inspectable evidence is a bug — demote to UNVERIFIABLE. Confidence is the model's own calibrated
+float only for `content.coverage`, whose extraction schema emits one directly; the other two
+aggregate discrete per-claim booleans (grounded/contradicted/undetermined) into PASS/FAIL/PARTIAL
+the same deterministic way the Tier-1 checkers do, so they reuse that plain confidence-1.0-or-null
+convention rather than a separate float.
 
 ### The hard stop (P2 / L4)
 Anything that is **taste** — "is it professional?", "is it well-written?", "is it good?" —

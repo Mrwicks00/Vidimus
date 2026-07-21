@@ -50,7 +50,7 @@ async function main() {
   ];
 
   const { sealed, rejected } = quarantineContentDeliverable(rawDeliverable.content);
-  const checked = applyContentChecks(criteria, sealed, rejected);
+  const checked = await applyContentChecks(criteria, sealed, rejected, "");
   const { headline, headline_basis } = computeHeadline(checked);
 
   console.log("--- checker results ---");
