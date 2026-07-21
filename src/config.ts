@@ -12,6 +12,12 @@ export const config = {
   chainId: Number(process.env.CHAIN_ID ?? 1952),
   payToAddress: required("PAY_TO_ADDRESS") as `0x${string}`,
   paymentTokenAddress: required("PAYMENT_TOKEN_ADDRESS") as `0x${string}`,
+  // EIP-3009 signs directly against the token's own EIP-712 domain - the SDK's client-side
+  // ExactEvmScheme needs these in the accepts' `extra` field to build that domain, exactly like
+  // the hand-rolled version it replaced did (rediscovered live: the SDK does not infer or fetch
+  // these from the facilitator on its own - createPaymentPayload throws without them).
+  paymentTokenName: required("PAYMENT_TOKEN_NAME"),
+  paymentTokenVersion: required("PAYMENT_TOKEN_VERSION"),
   priceAtomic: BigInt(process.env.PRICE_ATOMIC ?? "100000"),
   // OKX facilitator (@okxweb3/x402-core's OKXFacilitatorClient) - verifies and settles payments
   // on our behalf via OKX's own broker service, HMAC-SHA256 authenticated. Replaces the D1-D7
