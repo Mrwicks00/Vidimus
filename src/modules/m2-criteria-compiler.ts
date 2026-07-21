@@ -24,7 +24,13 @@ import {
 // (OpenRouter's own `supported_parameters` metadata confirms structured_outputs support - see
 // https://openrouter.ai/api/v1/models) - smaller free models were unreliable at the strict
 // tier/method JSON schema this module depends on.
-const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1" });
+// `timeout`/`maxRetries: 0` - without these the SDK defaults to a 10-minute timeout plus its own
+// 2 internal retries, stacking with compileCriteria's own outer retry loop below into a
+// worst-case hang of nearly an hour if the free model stalls without erroring. Observed live: a
+// paid /verify replay hung past 5 minutes with no response at all, which is indistinguishable
+// from a dead server to any caller (including OKX's own ASP validator) - bounding each attempt
+// here keeps the outer retry loop, not the SDK, in control of worst-case latency.
+const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 20_000, maxRetries: 0 });
 
 const METHOD_NAMES = Object.keys(METHOD_REGISTRY) as [Method, ...Method[]];
 
