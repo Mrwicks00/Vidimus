@@ -32,7 +32,9 @@ const accepts = { scheme: "exact" as const, network: NETWORK, payTo: config.payT
 // both here in the SDK's own route table makes that structurally impossible to regress, unlike
 // the old hand-rolled version which needed the same middleware manually applied to both routes.
 const resource = `${config.publicBaseUrl}/verify`;
-const description = "Vidimus conformance verdict - signed, evidence-backed verification against onchain, dataset, code, and content deliverables";
+const description =
+  "Vidimus conformance verdict - signed, evidence-backed verification against onchain, dataset, code, and content deliverables. " +
+  `Before paying, call the free preview endpoint POST ${config.publicBaseUrl}/verify/requirements with the same jobId to see the exact deliverable shape required - avoids paying for a submission that turns out UNVERIFIABLE due to a shape mismatch.`;
 
 export const verifyRoutes: RoutesConfig = {
   "GET /verify": { accepts, resource, description, mimeType: "application/json" },
