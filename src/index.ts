@@ -9,6 +9,7 @@ import { config } from "./config.js";
 import { resourceServer, verifyRoutes } from "./x402/server.js";
 import { verifyRoute } from "./routes/verify.js";
 import { demoRoute } from "./routes/demo.js";
+import { requirementsRoute } from "./routes/requirements.js";
 
 // Node's fetch (undici) resolves IPv6 first by default; in this environment (and observed live
 // on at least one deployment target) that IPv6 route to some hosts (e.g. openrouter.ai, used by
@@ -27,6 +28,9 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.use(paymentMiddleware(verifyRoutes, resourceServer));
 app.route("/", verifyRoute);
 app.route("/", demoRoute);
+// Free pre-flight (see src/routes/requirements.ts) - not in verifyRoutes above, so the
+// paymentMiddleware's exact "/verify" route table never matches this distinct path.
+app.route("/", requirementsRoute);
 
 // Static frontend (web/, built by `npm run build` into web/dist) - served from the same
 // process so the marketing/demo page and the priced API live on one Render service. Falls

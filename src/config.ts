@@ -51,4 +51,10 @@ export const config = {
   demoBuyerPrivateKey: (process.env.DEMO_BUYER_PRIVATE_KEY || "") as `0x${string}` | "",
   demoCooldownSeconds: Number(process.env.DEMO_COOLDOWN_SECONDS ?? 180),
   demoDailyLimit: Number(process.env.DEMO_DAILY_LIMIT ?? 15),
+  // POST /verify/requirements (src/routes/requirements.ts) - free, unauthenticated pre-flight
+  // that runs the same M2 compile step /verify does, so callers can learn the deliverable shape
+  // before paying. Free means unmetered by payment, so it needs its own cost-abuse throttle
+  // (same cooldown/daily-counter shape as the demo route above) instead of relying on x402.
+  requirementsCooldownSeconds: Number(process.env.REQUIREMENTS_COOLDOWN_SECONDS ?? 5),
+  requirementsDailyLimit: Number(process.env.REQUIREMENTS_DAILY_LIMIT ?? 200),
 };
