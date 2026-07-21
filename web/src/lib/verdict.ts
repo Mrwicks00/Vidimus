@@ -19,7 +19,6 @@ export interface Criterion {
 export interface Verdict {
   vidimus_version: string;
   job_id: string;
-  payment_id: string;
   subject: { spec_hash: string; deliverable_hash: string; deliverable_kind: string };
   criteria: Criterion[];
   headline: VerdictResult;

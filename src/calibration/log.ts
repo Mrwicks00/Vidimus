@@ -77,7 +77,6 @@ export async function appendCalibrationEntry(
         seq: tail.seq,
         logged_at: loggedAt,
         job_id: verdict.job_id,
-        payment_id: verdict.payment_id,
         verdict_digest: verdictDigest,
         verdict_signature: verdict.signature,
         signer: verdict.signer,

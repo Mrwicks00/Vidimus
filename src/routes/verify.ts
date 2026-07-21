@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { Hono, type Context } from "hono";
 import { ulid } from "ulid";
-import { x402Gate } from "../x402/middleware.js";
 import { compileCriteria, InjectionSuspectedError } from "../modules/m2-criteria-compiler.js";
 import { applyOnchainChecks, type OnchainDeliverable } from "../modules/m3-onchain.js";
 import { applyDataChecks, type DataDeliverable } from "../modules/m3-data.js";
@@ -60,8 +59,6 @@ function buildSummary(criteria: Criterion[], headline: VerdictResult, headlineBa
 }
 
 async function handleVerify(c: Context) {
-  const paymentId = c.get("paymentId");
-
   let rawSpec = "";
   let rawDeliverable: VerifyRequestBody["deliverable"];
   try {
@@ -156,7 +153,6 @@ async function handleVerify(c: Context) {
   const verdictBody: Omit<Verdict, "signature"> = {
     vidimus_version: "1.0",
     job_id: `vd_${ulid()}`,
-    payment_id: paymentId,
     subject: {
       spec_hash: quarantinedSpec ? quarantinedSpec.hash : ZERO_HASH,
       deliverable_hash: deliverableHash,
@@ -190,9 +186,7 @@ async function handleVerify(c: Context) {
   return c.json(verdict);
 }
 
-// GET is registered alongside POST (both x402-gated) because OKX's marketplace endpoint
-// validator probes with a plain GET before any real paid call - without this, an unpaid GET
-// fell through to the SPA catch-all in index.ts and returned 200 HTML instead of a 402
-// challenge, so the listing review saw "not a valid x402 service".
-verifyRoute.post("/verify", x402Gate, handleVerify);
-verifyRoute.get("/verify", x402Gate, handleVerify);
+// Payment gating (both GET and POST) lives in the global paymentMiddleware mounted in
+// src/index.ts, not here - see src/x402/server.ts for the route table.
+verifyRoute.post("/verify", handleVerify);
+verifyRoute.get("/verify", handleVerify);

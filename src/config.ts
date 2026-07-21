@@ -10,14 +10,17 @@ export const config = {
   port: Number(process.env.PORT ?? 8787),
   rpcUrl: required("RPC_URL"),
   chainId: Number(process.env.CHAIN_ID ?? 1952),
-  facilitatorPrivateKey: required("FACILITATOR_PRIVATE_KEY") as `0x${string}`,
   payToAddress: required("PAY_TO_ADDRESS") as `0x${string}`,
   paymentTokenAddress: required("PAYMENT_TOKEN_ADDRESS") as `0x${string}`,
-  // EIP-3009 signs directly against the token's own EIP-712 domain - these must exactly match
-  // what the deployed token contract actually uses, or every signature recovery will fail.
-  paymentTokenName: required("PAYMENT_TOKEN_NAME"),
-  paymentTokenVersion: required("PAYMENT_TOKEN_VERSION"),
   priceAtomic: BigInt(process.env.PRICE_ATOMIC ?? "100000"),
+  // OKX facilitator (@okxweb3/x402-core's OKXFacilitatorClient) - verifies and settles payments
+  // on our behalf via OKX's own broker service, HMAC-SHA256 authenticated. Replaces the D1-D7
+  // hand-rolled EIP-3009 verify/settle path (see git history) after repeated OKX.AI listing
+  // rejections traced to subtle hand-rolled wire-format bugs; the official SDK is exercised
+  // directly against OKX's own validator, so it can't drift from what that validator expects.
+  okxApiKey: required("OKX_API_KEY"),
+  okxSecretKey: required("OKX_SECRET_KEY"),
+  okxPassphrase: required("OKX_PASSPHRASE"),
   erc8004Id: process.env.ERC8004_ID ?? "",
   erc8004Address: (process.env.ERC8004_ADDRESS ?? "") as `0x${string}` | "",
   // M2 criteria compiler backend: OpenRouter (openai-sdk-compatible), not the direct Anthropic

@@ -175,7 +175,7 @@ signature, signer_erc8004_id, ruleset_version_hash, signed_at
 predated locators/`evidence.kind`/the content family and had a `verdict_confidence` field the
 real `Verdict` type never had)
 ```
-seq, logged_at, job_id, payment_id,        # payment_id == the x402 settlement tx in this system
+seq, logged_at, job_id,
 verdict_digest, verdict_signature, signer, # keyed by the verdict's own EIP-191 signature
 ruleset_version, ruleset_hash, issued_at,
 headline, headline_basis,

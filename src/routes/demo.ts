@@ -5,9 +5,11 @@
 // money on every successful run and every visitor on the internet can reach it.
 import { Hono } from "hono";
 import { privateKeyToAccount } from "viem/accounts";
+import { x402Client } from "@okxweb3/x402-core/client";
+import { x402HTTPClient } from "@okxweb3/x402-core/http";
+import type { SettleResponse } from "@okxweb3/x402-core/types";
+import { ExactEvmScheme, toClientEvmSigner } from "@okxweb3/x402-evm";
 import { config } from "../config.js";
-import { EIP3009_TRANSFER_TYPES, eip3009Domain } from "../x402/eip3009.js";
-import type { Eip3009Authorization, PaymentRequirements, PaymentResponse, PaymentSignatureHeader } from "../x402/types.js";
 import type { OnchainDeliverable } from "../modules/m3-onchain.js";
 
 export const demoRoute = new Hono();
@@ -139,48 +141,22 @@ demoRoute.post("/demo/verify", async (c) => {
     if (forwardedProto) url.protocol = `${forwardedProto}:`;
     const verifyUrl = `${url.protocol}//${url.host}/verify`;
 
+    const account = privateKeyToAccount(config.demoBuyerPrivateKey as `0x${string}`);
+    const network = `eip155:${config.chainId}` as const;
+    const client = new x402HTTPClient(new x402Client().register(network, new ExactEvmScheme(toClientEvmSigner(account))));
+
     const first = await fetch(verifyUrl, { method: "POST" });
     if (first.status !== 402) {
       throw new Error(`expected a 402 payment challenge from /verify, got ${first.status}`);
     }
-    const requirements = (await first.json()) as PaymentRequirements;
-    const accepted = requirements.accepts[0];
-    if (!accepted) throw new Error("payment challenge had no accepted payment method");
+    const paymentRequired = client.getPaymentRequiredResponse((name) => first.headers.get(name));
 
-    const account = privateKeyToAccount(config.demoBuyerPrivateKey as `0x${string}`);
-    const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
-    const validAfter = 0n;
-    const validBefore = nowSeconds + BigInt(accepted.maxTimeoutSeconds);
-    const nonce = `0x${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}` as `0x${string}`;
-
-    const signature = await account.signTypedData({
-      domain: eip3009Domain(accepted.extra.name, accepted.extra.version, Number(accepted.network.split(":")[1]), accepted.asset),
-      types: EIP3009_TRANSFER_TYPES,
-      primaryType: "TransferWithAuthorization",
-      message: {
-        from: account.address,
-        to: accepted.payTo,
-        value: BigInt(accepted.amount),
-        validAfter,
-        validBefore,
-        nonce,
-      },
-    });
-
-    const authorization: Eip3009Authorization = {
-      from: account.address,
-      to: accepted.payTo,
-      value: accepted.amount,
-      validAfter: validAfter.toString(),
-      validBefore: validBefore.toString(),
-      nonce,
-    };
-    const header: PaymentSignatureHeader = { x402Version: 2, payload: { authorization, signature } };
-    const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString("base64url");
+    const paymentPayload = await client.createPaymentPayload(paymentRequired);
+    const paymentHeaders = client.encodePaymentSignatureHeader(paymentPayload);
 
     const second = await fetch(verifyUrl, {
       method: "POST",
-      headers: { "PAYMENT-SIGNATURE": encodedHeader, "content-type": "application/json" },
+      headers: { ...paymentHeaders, "content-type": "application/json" },
       body: JSON.stringify({ spec: demoCase.spec, deliverable: demoCase.deliverable }),
     });
     const bodyText = await second.text();
@@ -189,10 +165,7 @@ demoRoute.post("/demo/verify", async (c) => {
     }
     const verdict = JSON.parse(bodyText);
 
-    const responseHeader = second.headers.get("PAYMENT-RESPONSE");
-    const settlement: PaymentResponse | null = responseHeader
-      ? JSON.parse(Buffer.from(responseHeader, "base64url").toString("utf8"))
-      : null;
+    const settlement: SettleResponse = client.getPaymentSettleResponse((name) => second.headers.get(name));
 
     state.countToday += 1;
     return c.json({ verdict, settlement });

@@ -1,16 +1,17 @@
 // Drives a real round-trip against a live server, acting as the paying buyer: hit /verify ->
-// get 402 -> decode accepts -> sign an EIP-3009 transferWithAuthorization directly against the
-// token's own EIP-712 domain (no intermediary contract, no pre-approval step) -> replay with
-// PAYMENT-SIGNATURE + a spec body -> print the verdict. Replaces the earlier Permit2-based
-// flow (see git history) - real OKX-ecosystem payment tooling defaults to Permit2's
-// witness-augmented variant, which this project has no documented way to verify safely;
-// EIP-3009 is simpler, well-documented, and what real third-party agents use in practice.
+// get 402 -> sign via the official OKX Payment SDK client (EIP-3009 transferWithAuthorization
+// under the hood, no gas, no pre-approval) -> replay with the SDK-encoded payment header + a
+// spec body -> print the verdict. Replaces the earlier hand-rolled EIP-3009 signing/base64url
+// encoding (see git history) - same motivation as the server-side migration: stop hand-rolling
+// the x402 wire format after repeated OKX.AI listing rejections traced to subtle bugs in it.
 import "dotenv/config";
 import { readFileSync } from "node:fs";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { createPublicClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import type { PaymentRequirements, Eip3009Authorization, PaymentSignatureHeader, PaymentResponse } from "../src/x402/types.js";
-import { EIP3009_TRANSFER_TYPES, eip3009Domain } from "../src/x402/eip3009.js";
+import { x402Client } from "@okxweb3/x402-core/client";
+import { x402HTTPClient } from "@okxweb3/x402-core/http";
+import type { SettleResponse } from "@okxweb3/x402-core/types";
+import { ExactEvmScheme, toClientEvmSigner } from "@okxweb3/x402-evm";
 
 function required(name: string): string {
   const value = process.env[name];
@@ -46,6 +47,7 @@ const deliverable = deliverablePath ? JSON.parse(readFileSync(deliverablePath, "
 const rpcUrl = required("RPC_URL");
 const chainId = Number(process.env.CHAIN_ID ?? 1952);
 const buyerKey = required("TEST_BUYER_PRIVATE_KEY") as `0x${string}`;
+const NETWORK = `eip155:${chainId}` as const;
 
 async function main() {
   const account = privateKeyToAccount(buyerKey);
@@ -56,7 +58,9 @@ async function main() {
     rpcUrls: { default: { http: [rpcUrl] } },
   } as const;
   const publicClient = createPublicClient({ chain, transport: http(rpcUrl) });
-  const walletClient = createWalletClient({ account, chain, transport: http(rpcUrl) });
+
+  const signer = toClientEvmSigner(account, publicClient);
+  const client = new x402HTTPClient(new x402Client().register(NETWORK, new ExactEvmScheme(signer)));
 
   console.log(`Buyer address: ${account.address}`);
   console.log(`Requesting ${targetUrl} (no payment)...`);
@@ -65,52 +69,21 @@ async function main() {
   if (first.status !== 402) {
     throw new Error(`Expected 402, got ${first.status}: ${await first.text()}`);
   }
-  const requirements = (await first.json()) as PaymentRequirements;
-  const accepted = requirements.accepts[0];
-  console.log("Got 402. accepts[0] =", accepted);
+  const paymentRequired = client.getPaymentRequiredResponse((name) => first.headers.get(name));
+  console.log("Got 402. accepts =", paymentRequired.accepts);
 
   const buyerBalance = await publicClient.getBalance({ address: account.address });
   if (buyerBalance === 0n) {
     console.warn("Warning: buyer wallet has no native gas token - fine for signing (EIP-3009 needs no buyer-side tx), but check if this is unexpected.");
   }
 
-  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
-  const validAfter = 0n;
-  const validBefore = nowSeconds + BigInt(accepted.maxTimeoutSeconds);
-  const nonce = `0x${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex")}` as `0x${string}`;
+  const paymentPayload = await client.createPaymentPayload(paymentRequired);
+  const paymentHeaders = client.encodePaymentSignatureHeader(paymentPayload);
 
-  const signature = await walletClient.signTypedData({
-    domain: eip3009Domain(accepted.extra.name, accepted.extra.version, chainId, accepted.asset),
-    types: EIP3009_TRANSFER_TYPES,
-    primaryType: "TransferWithAuthorization",
-    message: {
-      from: account.address,
-      to: accepted.payTo,
-      value: BigInt(accepted.amount),
-      validAfter,
-      validBefore,
-      nonce,
-    },
-  });
-
-  const auth: Eip3009Authorization = {
-    from: account.address,
-    to: accepted.payTo,
-    value: accepted.amount,
-    validAfter: validAfter.toString(),
-    validBefore: validBefore.toString(),
-    nonce,
-  };
-  const header: PaymentSignatureHeader = {
-    x402Version: 2,
-    payload: { authorization: auth, signature },
-  };
-  const encodedHeader = Buffer.from(JSON.stringify(header), "utf8").toString("base64url");
-
-  console.log("Replaying with PAYMENT-SIGNATURE and a spec body...");
+  console.log("Replaying with the signed payment header and a spec body...");
   const second = await fetch(targetUrl, {
     method: "POST",
-    headers: { "PAYMENT-SIGNATURE": encodedHeader, "content-type": "application/json" },
+    headers: { ...paymentHeaders, "content-type": "application/json" },
     body: JSON.stringify(deliverable ? { spec, deliverable } : { spec }),
   });
 
@@ -119,9 +92,7 @@ async function main() {
     throw new Error(`Replay failed: ${second.status} ${body}`);
   }
 
-  const responseHeader = second.headers.get("PAYMENT-RESPONSE");
-  if (!responseHeader) throw new Error("200 response missing PAYMENT-RESPONSE header");
-  const settlement = JSON.parse(Buffer.from(responseHeader, "base64url").toString("utf8")) as PaymentResponse;
+  const settlement: SettleResponse = client.getPaymentSettleResponse((name) => second.headers.get(name));
 
   console.log("\n--- SUCCESS ---");
   console.log("Settlement:", settlement);
@@ -129,7 +100,7 @@ async function main() {
   console.log(`Criteria compiled: ${verdict.criteria?.length ?? 0}`);
   console.log(JSON.stringify(verdict, null, 2));
 
-  const receipt = await publicClient.getTransactionReceipt({ hash: settlement.transaction });
+  const receipt = await publicClient.getTransactionReceipt({ hash: settlement.transaction as `0x${string}` });
   console.log(`\nOn-chain confirmation: status=${receipt.status}, block=${receipt.blockNumber}`);
 }
 

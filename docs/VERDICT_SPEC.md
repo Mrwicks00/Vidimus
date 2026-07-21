@@ -15,7 +15,6 @@ used for signing (see §5). JSON, UTF-8, no trailing whitespace, keys as written
 {
   "vidimus_version": "1.0",              // schema version string
   "job_id": "vd_<ulid>",
-  "payment_id": "<paymentId from x402 settlement>",
   "subject": {
     "spec_hash": "sha256:<hex>",         // hash of the spec we compiled from
     "deliverable_hash": "sha256:<hex>",  // hash of the deliverable we inspected

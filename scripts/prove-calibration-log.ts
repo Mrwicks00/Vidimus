@@ -1,9 +1,7 @@
 // PROOF gate for D6.B (docs/ROADMAP.md). Bypasses M1 (HTTP/payment) and M2 (Opus criteria
 // compilation) - same established convention as scripts/verify-code-sandbox.ts /
 // verify-data-sample.ts for a "real mechanism, precise repeatable criteria" proof, and this
-// session's explicit brief (no new Opus call; reuses the D6.A content fixture + the real settled
-// payment_id from that live round trip, settlement tx
-// 0x005ae301a1391c13a14bcfa7aef48f73ed9ec93902c57497ff4ceec182e22a6c - CLAUDE_HISTORY.md
+// session's explicit brief (no new Opus call; reuses the D6.A content fixture - CLAUDE_HISTORY.md
 // Session 10). The criteria[] below is hand-reconstructed to exactly match what M2 actually
 // compiled that session (4 EXPLICIT + 1 bonus INFERRED content.format at a second locator index
 // with no matching claim) - not invented, a faithful replay of an already-proven compile.
@@ -23,8 +21,6 @@ import { appendCalibrationEntry, readCalibrationLog, verifyChainIntegrity } from
 import { spotCheckCriterion } from "../src/calibration/spotcheck.js";
 import { config } from "../src/config.js";
 import type { Criterion, Verdict } from "../src/verdict/types.js";
-
-const PRIOR_SETTLEMENT_TX = "0x005ae301a1391c13a14bcfa7aef48f73ed9ec93902c57497ff4ceec182e22a6c";
 
 const fixturePath = new URL("./fixtures/content-deliverable.json", import.meta.url);
 const rawDeliverable = JSON.parse(readFileSync(fixturePath, "utf8")) as { content: unknown };
@@ -66,7 +62,6 @@ async function main() {
   const verdictBody: Omit<Verdict, "signature"> = {
     vidimus_version: "1.0",
     job_id: `vd_calibration_proof_${Date.now()}`,
-    payment_id: PRIOR_SETTLEMENT_TX,
     subject: { spec_hash: "sha256:reused-from-d6a-fixture", deliverable_hash: deliverableHash, deliverable_kind: "content" },
     criteria: checked,
     headline,

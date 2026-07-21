@@ -30,7 +30,6 @@ function verdict(headline: VerdictResult, criteria: Criterion[], opts: Partial<V
   return {
     vidimus_version: "1.0",
     job_id: `vd_fixture_${seq}`,
-    payment_id: "0xpayment",
     subject: { spec_hash: "sha256:spec", deliverable_hash: "sha256:deliverable", deliverable_kind: "content" },
     criteria,
     headline,
@@ -59,7 +58,6 @@ test("appends an entry with the correct derived shape (no evidence.ref/detail le
   assert.equal(entry.seq, 0);
   assert.equal(entry.prev_hash, null);
   assert.equal(entry.job_id, v.job_id);
-  assert.equal(entry.payment_id, v.payment_id);
   assert.equal(entry.verdict_signature, v.signature);
   assert.equal(entry.verdict_digest, "0xdigest");
   assert.equal(entry.headline, "PASS");

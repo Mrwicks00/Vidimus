@@ -23,9 +23,6 @@ export interface CalibrationLogEntry {
   seq: number;
   logged_at: string;
   job_id: string;
-  // NB: in this system payment_id already IS the x402 settlement tx hash
-  // (src/x402/middleware.ts sets paymentId = settlement.transaction) - one field, not two.
-  payment_id: string;
   verdict_digest: string;
   verdict_signature: string;
   signer: Verdict["signer"];

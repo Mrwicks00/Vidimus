@@ -4,7 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { setDefaultResultOrder } from "node:dns";
 import { resolve } from "node:path";
 import { Hono } from "hono";
+import { paymentMiddleware } from "@okxweb3/x402-hono";
 import { config } from "./config.js";
+import { resourceServer, verifyRoutes } from "./x402/server.js";
 import { verifyRoute } from "./routes/verify.js";
 import { demoRoute } from "./routes/demo.js";
 
@@ -19,6 +21,10 @@ setDefaultResultOrder("ipv4first");
 
 const app = new Hono();
 app.get("/health", (c) => c.json({ ok: true }));
+// Gates both GET and POST /verify with the official OKX x402 SDK - mounted globally (not per
+// route) so the SDK's own route table is the single source of truth for which paths are paid,
+// replacing the old per-route x402Gate middleware.
+app.use(paymentMiddleware(verifyRoutes, resourceServer));
 app.route("/", verifyRoute);
 app.route("/", demoRoute);
 
