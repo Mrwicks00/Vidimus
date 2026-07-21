@@ -6,8 +6,17 @@ function required(name: string): string {
   return value;
 }
 
+const port = Number(process.env.PORT ?? 8787);
+
 export const config = {
-  port: Number(process.env.PORT ?? 8787),
+  port,
+  // The SDK builds the x402 challenge's `resource.url` from the raw incoming request (Hono's
+  // c.req.url), which comes back `http://` on Render - Render's proxy terminates TLS and forwards
+  // plain HTTP internally, and unlike our old hand-rolled challenge builder, the SDK doesn't
+  // check `x-forwarded-proto` itself. RENDER_EXTERNAL_URL is a Render-provided env var (always
+  // the correct public https:// URL) - use it as the SDK's `resource` override instead of relying
+  // on request-derived scheme detection. Falls back to localhost for local dev.
+  publicBaseUrl: process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`,
   rpcUrl: required("RPC_URL"),
   chainId: Number(process.env.CHAIN_ID ?? 1952),
   payToAddress: required("PAY_TO_ADDRESS") as `0x${string}`,
