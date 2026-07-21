@@ -6,9 +6,10 @@ reusable for any future agent, not specific to this repo.
 
 **Bottom line up front:** if your service is pay-per-call, use the official OKX Payment SDK
 (`@okxweb3/x402-*`, Node/Go/Rust/Java/Python — see the "Integrate via SDK" doc linked from the
-A2MCP guide) instead of hand-rolling the x402 wire format. Section 3 below is a list of ways to
-get the hand-rolled version subtly wrong that cost an entire debugging session to find — an
-SDK that's already been exercised against OKX's real validator won't have these bugs.
+A2MCP guide). We initially hand-rolled the x402 wire format instead, burned an entire session
+finding the five bugs in §3.1 below, and after fixing all of them still got rejected a fourth
+time — so we migrated Vidimus to the real SDK. §3.2 is what that migration actually involved,
+including two bugs *in that migration* worth knowing about up front.
 
 ---
 
@@ -49,7 +50,9 @@ independently of whether the endpoint actually works. Symptoms if you miss this:
 Don't waste retries against a designated-provider test job while the ASP is still in rejected
 status — the job pipeline will keep saying "no matching services" regardless of endpoint health.
 
-## 3. x402 / A2MCP endpoint pitfalls (the actual bugs, in the order we found them)
+## 3. x402 / A2MCP endpoint
+
+### 3.1 Hand-rolled pitfalls (why we stopped hand-rolling)
 
 All four of these produced the *same* generic-sounding rejections ("endpoint unreachable",
 "has not passed x402 standard validation", "no response, timed out") — none of the error text
@@ -94,6 +97,70 @@ search --query "<keyword>"` finds one; pick one with `soldCount > 0`).
    `PAYMENT-REQUIRED` header and no `accepts` array — that shape alone can trip "not a valid x402
    service" checks that probe the invalid-signature path specifically. Re-emit the full challenge
    (header + `accepts`) alongside the error field.
+
+### 3.2 What migrating to the real SDK actually involves (Node/Hono)
+
+```bash
+npm install @okxweb3/x402-hono @okxweb3/x402-core @okxweb3/x402-evm
+```
+
+Server side, once, mounted globally (not per-route):
+
+```ts
+import { OKXFacilitatorClient } from "@okxweb3/x402-core";
+import { x402ResourceServer, paymentMiddleware } from "@okxweb3/x402-hono";
+import { ExactEvmScheme } from "@okxweb3/x402-evm/exact/server";
+
+const facilitatorClient = new OKXFacilitatorClient({ apiKey, secretKey, passphrase }); // OKX
+// Developer Portal credentials - a different thing from your onchainos/wallet credentials.
+const resourceServer = new x402ResourceServer(facilitatorClient).register("eip155:196", new ExactEvmScheme());
+
+app.use(paymentMiddleware(
+  {
+    "GET /verify": { accepts: {...}, description: "...", mimeType: "application/json" },
+    "POST /verify": { accepts: {...}, description: "...", mimeType: "application/json" },
+  },
+  resourceServer,
+));
+```
+
+Declaring both verbs in the SDK's own route table is what replaces §3.1 bug #2 (GET not gated) -
+structurally, not by remembering to apply middleware twice. Client side (buyer), replacing
+hand-signed EIP-3009 + hand-encoded headers:
+
+```ts
+import { x402Client } from "@okxweb3/x402-core/client";
+import { x402HTTPClient } from "@okxweb3/x402-core/http";
+import { ExactEvmScheme, toClientEvmSigner } from "@okxweb3/x402-evm";
+
+const client = new x402HTTPClient(new x402Client().register("eip155:196", new ExactEvmScheme(toClientEvmSigner(account))));
+const paymentRequired = client.getPaymentRequiredResponse((name) => response.headers.get(name));
+const paymentPayload = await client.createPaymentPayload(paymentRequired);
+const headers = client.encodePaymentSignatureHeader(paymentPayload); // spread into your fetch call
+```
+
+Two bugs we hit *in this migration itself*, both silent (no error until you actually exercise the
+paid path):
+
+1. **`accepts.extra.name`/`extra.version` (the token's EIP-712 domain) are still your
+   responsibility.** It's tempting to think the SDK/facilitator knows this for a well-known
+   stablecoin - it doesn't. Omit it and the *client* throws `"EIP-712 domain parameters (name,
+   version) are required in payment requirements for asset ..."` the moment it tries to sign -
+   the 402 challenge itself looks completely fine, so this only surfaces on a real paid attempt.
+2. **`resource.url` in the challenge comes back `http://`, not `https://`, on Render** (or any
+   proxy that terminates TLS and forwards plain HTTP internally) - the SDK builds it from the
+   raw incoming request and, unlike a hand-rolled builder, doesn't consult `x-forwarded-proto`
+   itself. Override it explicitly per route (`resource: "https://your-domain/verify"` in the
+   route config) rather than trusting request-derived scheme detection. On Render specifically,
+   `process.env.RENDER_EXTERNAL_URL` is always the correct public URL.
+
+One behavioral difference worth knowing before you design your response schema: the SDK verifies
+the payment signature, runs your route handler, buffers the response, *then* settles on-chain -
+the opposite order of a naive hand-rolled implementation that settles first and only calls the
+handler once payment is confirmed. If your response body embeds anything derived from the
+settlement (a tx hash, e.g.), it won't exist yet at handler time - either move that reference to
+metadata outside anything you cryptographically sign, or rely on the standard `PAYMENT-RESPONSE`
+header the SDK attaches to the same HTTP response instead of duplicating it in the body.
 
 ## 4. Fast local iteration loop
 
@@ -157,6 +224,16 @@ credential files into the deployed environment.
   Never commit these files or their base64 to git — Secret Files exist precisely so credentials
   never touch the repo.
 
+- **The restored session goes stale the moment your local wallet changes** (switch accounts, add
+  a wallet, anything that touches `~/.onchainos/`) — the Secret Files are a point-in-time copy,
+  not a live sync. Symptom: everything deploys fine, the endpoint answers, but any code path that
+  shells out to `onchainos wallet sign-message --from <address>` fails with `"no address matches
+  from=<address> chain=..."` even though `onchainos wallet addresses` proves that address exists
+  *locally* right now. Fix is the same four-file base64 regenerate-and-repaste as the initial
+  setup above, not a code change - confirm with `onchainos wallet addresses` locally first that
+  the address your code actually signs with (whatever env var it reads) is present before
+  re-uploading.
+
 - **If you also run the `okx-a2a` A2A daemon server-side** (needed so OKX.AI's "agent online
   status" check gets a response, separate from any HTTP API you expose), two more non-obvious
   gotchas:
@@ -175,6 +252,18 @@ credential files into the deployed environment.
      `optional`, overall `ready: true` regardless) — don't chase fixing it.
   4. Run both `okx-a2a` calls non-fatally (`|| echo "WARNING..."`) in the start script — an A2A
      hiccup should never be able to take down your actual paid API.
+  5. If your Anthropic credit runs out and you have no budget to top it up, `okx-a2a` can run on
+     `codex` instead of `claude`, pointed at any free OpenAI-compatible endpoint (e.g. NVIDIA
+     NIM's free tier, `https://integrate.api.nvidia.com/v1`) via `model_providers` in
+     `~/.codex/config.toml`. Two gotchas: (a) that config only works through the older
+     `wire_api = "chat"` protocol, which codex releases 0.14x+ dropped - pin an exact older
+     version (`@openai/codex@0.90.0` is confirmed working) rather than `^latest`; (b) `okx-a2a`'s
+     `provider_cli` doctor check wants the `codex` CLI to have *some* logged-in credential on
+     disk, separate from which `model_provider` actual completions route through - satisfy it
+     non-interactively with `echo "$KEY" | codex login --with-api-key`, which doesn't change
+     the active provider. Then `okx-a2a ai-provider set --provider codex --json`. The free
+     model's tool-use reliability for actually executing the reply (not just answering) is
+     noticeably weaker than Claude's - budget for occasional missed replies if you go this route.
 
 ## 6. Manual end-to-end test, and its actual cost
 
