@@ -85,6 +85,18 @@ okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: o
 # permanently; run it manually via Render's Shell when deep-diagnosing a specific reply.)
 (okx-a2a logs server 2>&1 | sed -u 's/^/[okx-a2a] /') &
 
+# Keep-warm self-ping through the PUBLIC url (not localhost - Render's free-tier spin-down
+# counts only inbound edge traffic, so an internal ping wouldn't register). A slept instance
+# takes 30-60s to cold-start, during which the edge drops paid POST replays with no HTTP
+# response at all - observed as OKX review failures (replayStatus=0, empty txHash) that look
+# identical to a dead endpoint. Non-fatal like everything else in this section.
+(
+  while true; do
+    sleep 300
+    curl -s -o /dev/null --max-time 30 "${RENDER_EXTERNAL_URL:-http://localhost:3000}/health" || echo "[render-start] WARNING: keep-warm ping failed"
+  done
+) &
+
 # Re-run doctor --fix every 2 minutes for the life of the container. The one-shot check above
 # only covers boot time - if the detached daemon dies or the Claude/XMTP binding goes stale
 # later, Render's own health check never notices (it only watches the HTTP port), so nothing
