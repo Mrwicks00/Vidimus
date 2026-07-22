@@ -223,6 +223,14 @@ fix for each is completely different, and none of them are a bug *in* your route
    domain, or a different host), not another code change. Worth knowing so you don't burn time
    re-debugging your own route handler for a review failure that's actually this.
 
+   Migration to Railway is in progress as the actual fix (§1 already lists `PUBLIC_BASE_URL`/
+   `RAILWAY_PUBLIC_DOMAIN` support for exactly this). One open wrinkle hit mid-migration: the
+   same `OKX_API_KEY`/`OKX_SECRET_KEY`/`OKX_PASSPHRASE` that authenticate fine from Render return
+   a `401` from every other environment tried (a separate sandbox, and Railway itself) - even
+   though Render's own most recent boot succeeded with those exact credentials minutes earlier,
+   ruling out simple expiry/rotation. Investigating whether OKX silently binds a key to the first
+   environment that successfully authenticates with it.
+
 ### 3.4 A gotcha in any code that shells out to a CLI and tries to classify the failure
 
 If your route handler shells out to `onchainos` (or any CLI) via Node's `execFile`/`execFileAsync`
