@@ -71,6 +71,27 @@ function classifyError(message: string): "invalid_format" | "not_found" | undefi
   return undefined;
 }
 
+// Node's execFile rejects with an error whose `.message` is just "Command failed: <cmd>" - the
+// CLI's actual JSON output (`{"ok":false,"error":"..."}`, written to stdout even on a non-zero
+// exit, confirmed live) lands on the error object's own `.stdout` property instead, not inside
+// `.message`. Confirmed directly against the real onchainos CLI this session - a first version
+// of this file matched `classifyError` against `err.message` alone and silently never matched in
+// production as a result. Prefer the parsed `error` field (the cleanest, exact onchainos text) as
+// the detail message shown to the buyer; fall back to the raw stdout/message if it doesn't parse.
+function describeError(err: unknown): string {
+  if (err && typeof err === "object" && "stdout" in err && typeof (err as { stdout?: unknown }).stdout === "string") {
+    const stdout = (err as { stdout: string }).stdout;
+    try {
+      const parsed = JSON.parse(stdout) as { error?: unknown };
+      if (typeof parsed.error === "string") return parsed.error;
+    } catch {
+      // not JSON - fall through to raw stdout below
+    }
+    if (stdout.trim()) return stdout.trim();
+  }
+  return err instanceof Error ? err.message : String(err);
+}
+
 /**
  * Never throws. x402 payment is already settled by the time this runs (verify.ts parses the
  * request body after x402Gate has settled payment, and there is no refund path from within the
@@ -94,7 +115,7 @@ export async function resolveSpecFromJobId(jobId: string, runner: CommonContextR
       if (description) return { ok: true, spec: description };
       lastError = "common context output did not contain a parseable Description field";
     } catch (err) {
-      lastError = err instanceof Error ? err.message : String(err);
+      lastError = describeError(err);
       const kind = classifyError(lastError);
       if (kind) return { ok: false, kind, message: lastError };
       // Same "transient DNS/network blips against the OKX gateway are observed in practice"

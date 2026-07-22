@@ -180,3 +180,19 @@ test("resolveSpecFromJobId: well-formed but nonexistent jobId -> not_found, no r
   });
   assert.equal(calls, 1);
 });
+
+// Regression: the real `execFile`/`execFileAsync` rejection shape carries the CLI's actual JSON
+// output (`{"ok":false,"error":"..."}`, written to stdout even on a non-zero exit - confirmed
+// live against the real onchainos CLI) on the error object's `.stdout` property, NOT inside
+// `.message` (which is just the generic "Command failed: <cmd>"). A first version of this file
+// only inspected `.message` and silently never classified anything in production as a result -
+// caught live, not by this test suite, which is exactly why this case is pinned here now.
+test("resolveSpecFromJobId: classifies a real execFile-shaped error (detail on .stdout, not .message)", async () => {
+  const runner = async () => {
+    const err = new Error("Command failed: onchainos agent common context 88213 --role user --agent-id 4933") as Error & { stdout: string };
+    err.stdout = '{"ok":false,"error":"--jobid invalid (must be `0x` + 64 chars, got 5 chars)."}';
+    throw err;
+  };
+  const result = await resolveSpecFromJobId("88213", runner);
+  assert.deepEqual(result, { ok: false, kind: "invalid_format", message: "--jobid invalid (must be `0x` + 64 chars, got 5 chars)." });
+});
