@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
-# Render start command. Restores the onchainos session/credential files from
-# Render's Secret Files (mounted at /etc/secrets/<filename>, base64-encoded to
-# survive the dashboard's text-only content box) into $HOME/.onchainos before
-# starting the server - signVerdict() shells out to `onchainos wallet
-# sign-message`, which needs an already-authenticated session on disk since
-# this deployed instance can't do interactive email+OTP login itself.
+# Host-agnostic start command (Render, Railway, or anywhere else). Restores the onchainos
+# session/credential files into $HOME/.onchainos before starting the server - signVerdict()
+# shells out to `onchainos wallet sign-message`, which needs an already-authenticated session on
+# disk since a deployed instance can't do interactive email+OTP login itself.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,24 +11,34 @@ export PATH="$PWD/bin:$PWD/node_modules/.bin:$PATH"
 
 mkdir -p "$HOME/.onchainos"
 
+# Prefers a plain base64 env var (works identically on any host - Railway/Render/anywhere else,
+# since ordinary environment variables already hold arbitrary-length strings, no special
+# handling needed). Falls back to Render's "Secret Files" convention (mounted at
+# /etc/secrets/<name>.b64) for the existing Render deployment, which used a mounted-file
+# workaround for Render's dashboard-paste-box UX rather than any real technical requirement.
 restore() {
-  local secret_file="$1"
-  local dest_file="$2"
-  if [ -f "$secret_file" ]; then
-    base64 -d "$secret_file" > "$dest_file"
+  local env_var="$1"
+  local secret_file="$2"
+  local dest_file="$3"
+  local b64="${!env_var:-}"
+  if [ -z "$b64" ] && [ -f "$secret_file" ]; then
+    b64="$(cat "$secret_file")"
+  fi
+  if [ -n "$b64" ]; then
+    echo "$b64" | base64 -d > "$dest_file"
     chmod 600 "$dest_file"
-    echo "[render-start] restored $dest_file"
+    echo "[start] restored $dest_file"
   else
-    echo "[render-start] WARNING: $secret_file not found - onchainos will not be authenticated"
+    echo "[start] WARNING: neither \$$env_var nor $secret_file set - onchainos will not be authenticated"
   fi
 }
 
-restore /etc/secrets/onchainos-session.b64 "$HOME/.onchainos/session.json"
-restore /etc/secrets/onchainos-keyring.b64 "$HOME/.onchainos/keyring.enc"
-restore /etc/secrets/onchainos-machine-identity.b64 "$HOME/.onchainos/machine-identity"
-restore /etc/secrets/onchainos-wallets.b64 "$HOME/.onchainos/wallets.json"
+restore ONCHAINOS_SESSION_B64 /etc/secrets/onchainos-session.b64 "$HOME/.onchainos/session.json"
+restore ONCHAINOS_KEYRING_B64 /etc/secrets/onchainos-keyring.b64 "$HOME/.onchainos/keyring.enc"
+restore ONCHAINOS_MACHINE_IDENTITY_B64 /etc/secrets/onchainos-machine-identity.b64 "$HOME/.onchainos/machine-identity"
+restore ONCHAINOS_WALLETS_B64 /etc/secrets/onchainos-wallets.b64 "$HOME/.onchainos/wallets.json"
 
-onchainos wallet status || echo "[render-start] WARNING: onchainos wallet status failed - check restored session files"
+onchainos wallet status || echo "[start] WARNING: onchainos wallet status failed - check restored session files"
 
 # okx-a2a A2A communication daemon - OKX.AI's own "agent online status" check pings this,
 # not just the HTTP API below. `doctor --fix` starts the daemon itself (detached) as one of
@@ -63,7 +71,7 @@ base_url = "https://integrate.api.nvidia.com/v1"
 env_key = "NVIDIA_NIM_API_KEY"
 wire_api = "chat"
 EOF
-[ -n "${NVIDIA_NIM_API_KEY:-}" ] || echo "[render-start] WARNING: NVIDIA_NIM_API_KEY is not set - codex/A2A replies will fail"
+[ -n "${NVIDIA_NIM_API_KEY:-}" ] || echo "[start] WARNING: NVIDIA_NIM_API_KEY is not set - codex/A2A replies will fail"
 
 # codex's own "logged in" state is separate from the model_providers config above - it's
 # whether codex has *any* OpenAI-account credential on disk, checked by `okx-a2a doctor`'s
@@ -73,10 +81,10 @@ EOF
 # record - it does NOT change which provider actual completions route through (that's
 # still model_provider = "nvidia_nim" above, via NVIDIA_NIM_API_KEY's own env_key) -
 # confirmed locally: a real completion via NIM still succeeds after this.
-echo "${NVIDIA_NIM_API_KEY:-unused-placeholder}" | codex login --with-api-key || echo "[render-start] WARNING: codex login --with-api-key failed"
+echo "${NVIDIA_NIM_API_KEY:-unused-placeholder}" | codex login --with-api-key || echo "[start] WARNING: codex login --with-api-key failed"
 
-okx-a2a ai-provider set --provider codex --json || echo "[render-start] WARNING: okx-a2a ai-provider set failed"
-okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
+okx-a2a ai-provider set --provider codex --json || echo "[start] WARNING: okx-a2a ai-provider set failed"
+okx-a2a doctor --fix --non-interactive --json || echo "[start] WARNING: okx-a2a doctor --fix reported issues - A2A online-status check may fail, /verify is unaffected"
 
 # The A2A daemon writes its own activity log (message sync, heartbeats) to a file that never
 # reaches Render's captured stdout - stream it in, prefixed, so real inbound-message activity
@@ -85,15 +93,25 @@ okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: o
 # permanently; run it manually via Render's Shell when deep-diagnosing a specific reply.)
 (okx-a2a logs server 2>&1 | sed -u 's/^/[okx-a2a] /') &
 
-# Keep-warm self-ping through the PUBLIC url (not localhost - Render's free-tier spin-down
+# Keep-warm self-ping through the PUBLIC url (not localhost - a free-tier host's spin-down
 # counts only inbound edge traffic, so an internal ping wouldn't register). A slept instance
 # takes 30-60s to cold-start, during which the edge drops paid POST replays with no HTTP
 # response at all - observed as OKX review failures (replayStatus=0, empty txHash) that look
-# identical to a dead endpoint. Non-fatal like everything else in this section.
+# identical to a dead endpoint. Same fallback priority as config.ts's publicBaseUrl - keep the
+# two in sync if this chain ever changes. Non-fatal like everything else in this section.
+if [ -n "${PUBLIC_BASE_URL:-}" ]; then
+  keep_warm_url="$PUBLIC_BASE_URL"
+elif [ -n "${RAILWAY_PUBLIC_DOMAIN:-}" ]; then
+  keep_warm_url="https://${RAILWAY_PUBLIC_DOMAIN}"
+elif [ -n "${RENDER_EXTERNAL_URL:-}" ]; then
+  keep_warm_url="$RENDER_EXTERNAL_URL"
+else
+  keep_warm_url="http://localhost:${PORT:-3000}"
+fi
 (
   while true; do
     sleep 300
-    curl -s -o /dev/null --max-time 30 "${RENDER_EXTERNAL_URL:-http://localhost:3000}/health" || echo "[render-start] WARNING: keep-warm ping failed"
+    curl -s -o /dev/null --max-time 30 "${keep_warm_url}/health" || echo "[start] WARNING: keep-warm ping failed"
   done
 ) &
 
@@ -105,7 +123,7 @@ okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: o
 (
   while true; do
     sleep 120
-    okx-a2a doctor --fix --non-interactive --json || echo "[render-start] WARNING: periodic okx-a2a doctor --fix failed"
+    okx-a2a doctor --fix --non-interactive --json || echo "[start] WARNING: periodic okx-a2a doctor --fix failed"
   done
 ) &
 

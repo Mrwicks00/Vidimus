@@ -37,7 +37,7 @@ app.route("/", requirementsRoute);
 // back to index.html for any unmatched GET so client-side routing (if ever added) still works.
 // Resolved from process.cwd() rather than import.meta.url: the compiled entrypoint lives at
 // dist/src/index.js, so a path relative to the module's own location would land on
-// dist/web/dist instead of the real web/dist at the repo root. scripts/render-start.sh cds to
+// dist/web/dist instead of the real web/dist at the repo root. scripts/start.sh cds to
 // the repo root before starting node, so cwd is reliable in both dev (tsx) and prod.
 const webDist = resolve(process.cwd(), "web/dist");
 if (existsSync(webDist)) {

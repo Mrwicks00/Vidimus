@@ -18,7 +18,7 @@ import {
 } from "../verdict/types.js";
 
 // Routed through OpenRouter (openai-sdk-compatible), not the direct Anthropic API - the direct
-// Anthropic key ran out of credit with no budget to top up (same root cause render-start.sh
+// Anthropic key ran out of credit with no budget to top up (same root cause start.sh
 // already worked around for the A2A daemon's auto-reply, via NVIDIA NIM). Default model is a
 // free OpenRouter listing chosen for reliable structured-output support and >10B active params
 // (OpenRouter's own `supported_parameters` metadata confirms structured_outputs support - see

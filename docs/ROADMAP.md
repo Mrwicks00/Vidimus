@@ -369,7 +369,7 @@ evidence and a correct taste refusal.
   with that screen at all. **Fix, shipped instead:** the `onchainos` binary committed directly
   into the repo (`bin/onchainos` - a public tool, not a secret, verified working since it's
   the exact binary used for every `onchainos` command this whole project) plus a Render start
-  script (`scripts/render-start.sh`) that restores an already-authenticated session
+  script (`scripts/start.sh`) that restores an already-authenticated session
   (`session.json`/`keyring.enc`/`machine-identity`/`wallets.json`) from Render's **Secret
   Files** (base64-encoded, never committed - staged locally then deleted, `.gitignore`d
   against recurrence) into `$HOME/.onchainos` before the server starts. Verified this crosses

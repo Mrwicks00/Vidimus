@@ -13,10 +13,15 @@ export const config = {
   // The SDK builds the x402 challenge's `resource.url` from the raw incoming request (Hono's
   // c.req.url), which comes back `http://` on Render - Render's proxy terminates TLS and forwards
   // plain HTTP internally, and unlike our old hand-rolled challenge builder, the SDK doesn't
-  // check `x-forwarded-proto` itself. RENDER_EXTERNAL_URL is a Render-provided env var (always
-  // the correct public https:// URL) - use it as the SDK's `resource` override instead of relying
-  // on request-derived scheme detection. Falls back to localhost for local dev.
-  publicBaseUrl: process.env.RENDER_EXTERNAL_URL ?? `http://localhost:${port}`,
+  // check `x-forwarded-proto` itself. Explicit `PUBLIC_BASE_URL` wins on any host; Railway's own
+  // `RAILWAY_PUBLIC_DOMAIN` is a bare domain (no scheme, unlike Render's var) so it needs the
+  // `https://` prefix added; `RENDER_EXTERNAL_URL` kept for the existing Render deployment.
+  // Falls back to localhost for local dev.
+  publicBaseUrl:
+    process.env.PUBLIC_BASE_URL ??
+    (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : undefined) ??
+    process.env.RENDER_EXTERNAL_URL ??
+    `http://localhost:${port}`,
   rpcUrl: required("RPC_URL"),
   chainId: Number(process.env.CHAIN_ID ?? 1952),
   payToAddress: required("PAY_TO_ADDRESS") as `0x${string}`,

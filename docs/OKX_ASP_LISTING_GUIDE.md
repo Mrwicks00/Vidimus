@@ -203,7 +203,7 @@ fix for each is completely different, and none of them are a bug *in* your route
 
 2. **Free-tier cold start.** A dormant Render (or similar PaaS) free/starter-tier instance takes
    30-60s to wake on the first request after idling - `/health` alone can take 10s+ on a cold
-   instance. Mitigate with a keep-warm self-ping (`scripts/render-start.sh` in this repo pings its
+   instance. Mitigate with a keep-warm self-ping (`scripts/start.sh` in this repo pings its
    own public `/health` every 5 minutes in the background) - cheap, and removes this specific
    cause entirely, though it doesn't help #3 below.
 

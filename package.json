@@ -8,7 +8,7 @@
     "dev:web": "npm --prefix web run dev",
     "build:web": "npm --prefix web install && npm --prefix web run build",
     "build": "npm run build:web && tsc -p tsconfig.json",
-    "start": "bash scripts/render-start.sh",
+    "start": "bash scripts/start.sh",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
     "create-wallets": "tsx scripts/create-wallets.ts",
