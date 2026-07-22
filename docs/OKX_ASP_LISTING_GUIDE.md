@@ -181,6 +181,61 @@ list (`onchainos agent task-in-progress`) as a best-effort fallback - see
 `src/marketplace/resolve-payer-task.ts`. Only trust this when exactly one task matches; multiple
 concurrent accepted tasks from the same buyer are genuinely ambiguous and should never be guessed.
 
+### 3.3 "Connection error"/"endpoint down" reports that aren't your route handler at all
+
+Three separate, real root causes produced review complaints that all read identically from OKX's
+side ("connection error", "no HTTP response", `replayStatus=0`) - worth telling apart, because the
+fix for each is completely different, and none of them are a bug *in* your route handler's logic.
+
+1. **An unbounded LLM call hangs the whole request.** If your verification pipeline calls out to
+   an LLM (compiling criteria, judging content, etc.) via an OpenAI-SDK-compatible client, the SDK
+   defaults to a **10-minute timeout** plus its **own internal retries (2 by default)** - these
+   stack multiplicatively with any retry loop you've already written around it. A single stalled
+   attempt against a free/rate-limited model (observed live: one run took 86.8s just to compile a
+   spec under load) can silently block the entire response for minutes, which every caller
+   (including your own test client, and OKX's review harness) sees as a dead connection, not a
+   slow one. **Fix**: set an explicit, short `timeout` and `maxRetries: 0` on the SDK client
+   itself (`new OpenAI({ timeout: 20_000, maxRetries: 0, ... })`) so *your own* outer retry loop
+   - which knows things the SDK doesn't (e.g. "don't retry a tripped security canary") - stays in
+   control of worst-case latency, instead of an invisible 10-minute default plus double-retries
+   deciding it for you. Confirmed live: before the fix, a second consecutive request hung past 5
+   minutes with zero response; after, back-to-back real paid requests completed in 21-46s each.
+
+2. **Free-tier cold start.** A dormant Render (or similar PaaS) free/starter-tier instance takes
+   30-60s to wake on the first request after idling - `/health` alone can take 10s+ on a cold
+   instance. Mitigate with a keep-warm self-ping (`scripts/render-start.sh` in this repo pings its
+   own public `/health` every 5 minutes in the background) - cheap, and removes this specific
+   cause entirely, though it doesn't help #3 below.
+
+3. **Shared-domain edge flakiness - genuinely not fixable in your own code.** Confirmed live,
+   independently of your app: `https://<app>.onrender.com` sits behind Render's shared
+   `*.onrender.com` edge (a Cloudflare-fronted CDN, per the CNAME chain), which can **intermittently
+   drop TLS handshakes from automated/datacenter clients specifically** for a window of several
+   minutes, then recover on its own with no code change and no redeploy. Reproduced directly: a
+   plain `curl`/`onchainos agent x402-check` against the exact same URL failed at the TLS layer
+   ("unexpected EOF") twice in a row, then succeeded on the third identical attempt seconds later
+   - while an external vantage point (a different fetch tool) got a clean `200` the whole time,
+   and Render's own status page showed all-green. A raw TCP connect to the app's specific
+   Cloudflare-assigned IP failed the same way a *different* Cloudflare-hosted IP did not,
+   confirming it wasn't a general Cloudflare/network problem, something narrower to that
+   IP/edge-node combination. There is no application-layer fix for this - if it recurs often
+   enough to matter, the actual fix is moving off the shared `onrender.com` domain (a custom
+   domain, or a different host), not another code change. Worth knowing so you don't burn time
+   re-debugging your own route handler for a review failure that's actually this.
+
+### 3.4 A gotcha in any code that shells out to a CLI and tries to classify the failure
+
+If your route handler shells out to `onchainos` (or any CLI) via Node's `execFile`/`execFileAsync`
+and needs to tell *which* error happened (bad input vs. a real outage) by inspecting the error
+text, don't check `err.message` - on a non-zero exit, Node's error object's `.message` is just the
+generic `"Command failed: <command that ran>"`. The CLI's **actual** error output (e.g.
+`onchainos`'s own `{"ok":false,"error":"..."}` JSON, written to stdout even on exit code 1) lands
+on the error object's `.stdout` property instead. A pattern-match against `.message` alone will
+silently never match anything in production, even though the exact same regex works perfectly
+against a hand-written test mock that (incorrectly) puts the CLI text directly into `.message`.
+Caught live, post-deploy, not by the test suite - the fix was checking `.stdout` first, falling
+back to `.message`/`String(err)` only if `.stdout` is absent or unparseable.
+
 ## 4. Fast local iteration loop
 
 Testing only against production Render costs a full deploy-and-wait cycle per guess. Faster path:

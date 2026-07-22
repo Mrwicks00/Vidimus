@@ -325,6 +325,20 @@ corrected by adding a short rule distinguishing "one exact structural target" (p
   truth to check against, never a guess in either direction. Otherwise the same
   `extractGrounding` call, aggregated as `grounded/total` claims; any contradicted → FAIL.
 
+**Single-asset auto-wire** (`src/modules/m3-content.ts` `autoFillSingleAssetContentClaims`,
+shipped after a real OKX review): `content.coverage`/`content.no_hallucination` claims carry
+*nothing but an assetId* - the actual topic comes from the criterion's own compiled text, not
+anything buyer-declared - so requiring a second, positionally-indexed array whose only job is
+pointing back at the one asset a buyer already submitted was pure undocumented friction, not real
+disambiguation. Confirmed live as a genuine customer-facing gap: a plain free-text submission with
+no claims array at all compiled real criteria correctly but scored 100% UNVERIFIABLE, because
+nothing told the buyer a second array existed. When `deliverable.content` has **exactly one**
+asset, both methods now auto-resolve every needed claim to that asset - `content.presence` /
+`content.format` / `content.bounds` / `content.pattern` / `content.source_grounding` are
+untouched (they need real buyer-supplied fields - a target, a metric, a pattern name, actual
+citation URLs - that can't be safely invented). Two or more assets submitted → genuine ambiguity,
+no auto-fill, same as before.
+
 Every Tier-2 result **must** attach `evidence.kind = "source_check"` with a concrete pointer
 (a quoted passage, or the fetched URL + support determination). A Tier-2 verdict with no
 inspectable evidence is a bug — demote to UNVERIFIABLE. Confidence is the model's own calibrated
