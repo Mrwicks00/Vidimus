@@ -116,8 +116,8 @@ test("resolveSpecFromJobId: immediate success", async () => {
     assert.equal(jobId, "job-1");
     return { stdout: "[Task Details]\n- Title: X\n- Description: Real spec text.\n- Budget: 1 USDT\n" };
   };
-  const spec = await resolveSpecFromJobId("job-1", runner);
-  assert.equal(spec, "Real spec text.");
+  const result = await resolveSpecFromJobId("job-1", runner);
+  assert.deepEqual(result, { ok: true, spec: "Real spec text." });
   assert.equal(calls, 1);
 });
 
@@ -128,24 +128,55 @@ test("resolveSpecFromJobId: fails twice (transient) then succeeds on the 3rd att
     if (calls < 3) throw new Error("Network unavailable - dns error");
     return { stdout: "[Task Details]\n- Description: Recovered spec.\n- Budget: 1 USDT\n" };
   };
-  const spec = await resolveSpecFromJobId("job-1", runner);
-  assert.equal(spec, "Recovered spec.");
+  const result = await resolveSpecFromJobId("job-1", runner);
+  assert.deepEqual(result, { ok: true, spec: "Recovered spec." });
   assert.equal(calls, 3);
 });
 
-test("resolveSpecFromJobId: exhausts all retries -> undefined, never throws", async () => {
+test("resolveSpecFromJobId: exhausts all retries (transient) -> unresolved, never throws", async () => {
   let calls = 0;
   const runner = async () => {
     calls += 1;
     throw new Error("Network unavailable - dns error");
   };
-  const spec = await resolveSpecFromJobId("job-1", runner);
-  assert.equal(spec, undefined);
+  const result = await resolveSpecFromJobId("job-1", runner);
+  assert.deepEqual(result, { ok: false, kind: "unresolved" });
   assert.equal(calls, 3);
 });
 
-test("resolveSpecFromJobId: job not found (CLI succeeds but no Description field) -> undefined, never throws", async () => {
+test("resolveSpecFromJobId: unparseable output (no Description field) -> unresolved, never throws", async () => {
   const runner = async () => ({ stdout: "Error: job not found\n" });
-  const spec = await resolveSpecFromJobId("does-not-exist", runner);
-  assert.equal(spec, undefined);
+  const result = await resolveSpecFromJobId("does-not-exist", runner);
+  assert.deepEqual(result, { ok: false, kind: "unresolved" });
+});
+
+// Real error text captured live this session: `onchainos agent common context 88213 ...`
+// (a marketplace-UI short task number, not the full on-chain jobId) is rejected by the CLI
+// itself, deterministically, before any network call - must be surfaced immediately, not
+// retried, and not silently swallowed into the generic "unresolved" bucket.
+test("resolveSpecFromJobId: invalid jobId format -> invalid_format, no retry", async () => {
+  let calls = 0;
+  const runner = async () => {
+    calls += 1;
+    throw new Error("--jobid invalid (must be `0x` + 64 chars, got 5 chars)");
+  };
+  const result = await resolveSpecFromJobId("88213", runner);
+  assert.deepEqual(result, { ok: false, kind: "invalid_format", message: "--jobid invalid (must be `0x` + 64 chars, got 5 chars)" });
+  assert.equal(calls, 1);
+});
+
+// Real error text captured live this session: a well-formed but nonexistent 0x+64-char jobId.
+test("resolveSpecFromJobId: well-formed but nonexistent jobId -> not_found, no retry", async () => {
+  let calls = 0;
+  const runner = async () => {
+    calls += 1;
+    throw new Error("failed to get task detail: Wallet API error (code=1001): task not found");
+  };
+  const result = await resolveSpecFromJobId(`0x${"0".repeat(64)}`, runner);
+  assert.deepEqual(result, {
+    ok: false,
+    kind: "not_found",
+    message: "failed to get task detail: Wallet API error (code=1001): task not found",
+  });
+  assert.equal(calls, 1);
 });

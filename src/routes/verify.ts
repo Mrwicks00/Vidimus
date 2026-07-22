@@ -5,8 +5,9 @@ import { compileCriteria, InjectionSuspectedError } from "../modules/m2-criteria
 import { applyOnchainChecks, type OnchainDeliverable } from "../modules/m3-onchain.js";
 import { applyDataChecks, type DataDeliverable } from "../modules/m3-data.js";
 import { applyCodeChecks, type CodeDeliverable } from "../modules/m3-code.js";
-import { applyContentChecks, type ContentDeliverable } from "../modules/m3-content.js";
+import { applyContentChecks, autoFillSingleAssetContentClaims, type ContentDeliverable } from "../modules/m3-content.js";
 import { computeHeadline } from "../modules/headline.js";
+import { computeDeliverableRequirements } from "../modules/deliverable-requirements.js";
 import {
   quarantineSpec,
   quarantineDeliverable,
@@ -69,7 +70,17 @@ async function handleVerify(c: Context) {
     // the task's own public record (see resolve-spec.ts). An explicit `spec` always wins if both
     // are present, so existing callers (scripts/test-buyer.ts) are unaffected.
     if (!rawSpec && typeof body?.jobId === "string" && body.jobId) {
-      rawSpec = (await resolveSpecFromJobId(body.jobId)) ?? "";
+      const resolved = await resolveSpecFromJobId(body.jobId);
+      if (resolved.ok) {
+        rawSpec = resolved.spec;
+      } else if (resolved.kind === "invalid_format") {
+        return c.json({ error: `jobId "${body.jobId}" is not valid: ${resolved.message} - jobId must be the full on-chain job id (0x + 64 hex chars), not the short task number shown in the marketplace UI.` }, 400);
+      } else if (resolved.kind === "not_found") {
+        return c.json({ error: `jobId "${body.jobId}" was not found - double-check it's the exact on-chain job id.` }, 400);
+      }
+      // kind === "unresolved" (transient/unparseable) - fall through with rawSpec still "",
+      // exactly today's baseline: degrades to "no spec provided" -> UNVERIFIABLE, never a 500
+      // for a request that already settled payment.
     }
   } catch {
     // no/invalid JSON body - treat as no spec/deliverable, criteria[] stays empty below.
@@ -128,7 +139,10 @@ async function handleVerify(c: Context) {
       criteria = await applyOnchainChecks(criteria, sealedOnchain, onchainRejected);
       criteria = await applyDataChecks(criteria, sealedData, dataRejected, deliverableHash);
       criteria = await applyCodeChecks(criteria, sealedCode, codeRejected);
-      criteria = await applyContentChecks(criteria, sealedContent, contentRejected, quarantinedSpec.canary);
+      // Single-asset auto-wire (OKX review): deliverableHash above already committed to the
+      // buyer's real submission - this only affects what the checkers see, never the commitment.
+      const effectiveSealedContent = autoFillSingleAssetContentClaims(criteria, sealedContent, contentRejected);
+      criteria = await applyContentChecks(criteria, effectiveSealedContent, contentRejected, quarantinedSpec.canary);
     } catch (err) {
       if (err instanceof InjectionSuspectedError) {
         // SECURITY.md §3: a tripped canary means the job is compromised input - do not emit
@@ -183,7 +197,14 @@ async function handleVerify(c: Context) {
     console.warn(`[calibration] failed to append log entry for job_id=${verdict.job_id}: ${err instanceof Error ? err.message : err}`);
   }
 
-  return c.json(verdict);
+  // `deliverable_requirements` is deliberately outside the signed verdict body (attached to the
+  // HTTP response only) - it's derived, informational shape-guidance, not evidence, so it
+  // shouldn't change what gets canonicalized/signed. Reuses the exact same function the free
+  // /verify/requirements pre-flight already uses (src/modules/deliverable-requirements.ts), so
+  // even a buyer who skipped that pre-flight sees what shape was expected, right in the paid
+  // response they already have (OKX review: "return a clear hint, not UNVERIFIABLE").
+  const deliverableRequirements = injectionSuspected ? {} : computeDeliverableRequirements(criteria);
+  return c.json({ ...verdict, deliverable_requirements: deliverableRequirements });
 }
 
 // Payment gating (both GET and POST) lives in the global paymentMiddleware mounted in

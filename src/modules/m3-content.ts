@@ -488,6 +488,47 @@ export async function checkNoHallucination(c: Criterion, claim: ContentNoHalluci
   );
 }
 
+// ---- single-asset auto-wire ----
+
+// Fixes a real customer-facing gap (OKX ASP review): `content.coverage[]` / `content.no_hallucination[]`
+// carry nothing but `{ assetId }` - per those methods' own claim schemas (src/security/
+// quarantine.ts), the actual topic/criterion comes from the compiled criterion text itself, not
+// anything buyer-declared. So when a submission has exactly one content asset, there is zero
+// ambiguity about which asset every content criterion should check - requiring a buyer to also
+// send a second, positionally-indexed array that only ever points back at the one asset they
+// already gave us is pure undocumented friction, not a real safety/disambiguation need. Only
+// fires for the two assetId-only methods; content.presence/format/bounds/pattern/source_grounding
+// all need real buyer-supplied fields (a target, a metric, a pattern name, real citation URLs)
+// that can't be safely invented, so those are untouched and correctly stay UNVERIFIABLE without
+// an explicit claim. Never overwrites an existing claim (explicit or quarantine-rejected) at a
+// given index - only fills a slot that was never submitted at all.
+const AUTO_FILLABLE_METHODS = ["content.coverage", "content.no_hallucination"] as const;
+
+export function autoFillSingleAssetContentClaims(
+  criteria: Criterion[],
+  sealed: ContentDeliverableSealed | undefined,
+  rejections: QuarantineRejection[],
+): ContentDeliverableSealed | undefined {
+  if (!sealed || sealed.content.length !== 1) return sealed;
+  const assetId = sealed.content[0]!.id;
+  const rejectedKeys = new Set(rejections.map((r) => `${r.method}[${r.index}]`));
+
+  const filled: ContentDeliverableSealed = { ...sealed };
+  for (const method of AUTO_FILLABLE_METHODS) {
+    const neededLength = criteria.reduce((max, c) => (c.locator?.method === method ? Math.max(max, c.locator.index + 1) : max), 0);
+    if (neededLength === 0) continue;
+    const existing = sealed[method] ?? [];
+    const next = existing.slice();
+    for (let i = 0; i < neededLength; i++) {
+      if (next[i] === undefined && !rejectedKeys.has(`${method}[${i}]`)) {
+        next[i] = { assetId };
+      }
+    }
+    (filled[method] as unknown[]) = next;
+  }
+  return filled;
+}
+
 // ---- dispatch ----
 
 // Dispatches every criterion whose locator addresses a ContentMethod - onchain/data/code

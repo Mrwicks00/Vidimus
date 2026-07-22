@@ -4,7 +4,7 @@
 // deliverable-requirements.ts for why this half of /verify needed to be split out on its own.
 import { Hono, type Context } from "hono";
 import { compileCriteria, InjectionSuspectedError } from "../modules/m2-criteria-compiler.js";
-import { computeDeliverableRequirements } from "../modules/deliverable-requirements.js";
+import { computeDeliverableRequirements, exampleDeliverable } from "../modules/deliverable-requirements.js";
 import { quarantineSpec, SpecQuarantineError } from "../security/quarantine.js";
 import { resolveSpecFromJobId } from "../marketplace/resolve-spec.js";
 import { config } from "../config.js";
@@ -66,7 +66,15 @@ requirementsRoute.post("/verify/requirements", async (c: Context) => {
     const body = await c.req.json<RequirementsRequestBody>();
     if (typeof body?.spec === "string") rawSpec = body.spec;
     if (!rawSpec && typeof body?.jobId === "string" && body.jobId) {
-      rawSpec = (await resolveSpecFromJobId(body.jobId)) ?? "";
+      const resolved = await resolveSpecFromJobId(body.jobId);
+      if (resolved.ok) {
+        rawSpec = resolved.spec;
+      } else if (resolved.kind === "invalid_format") {
+        return c.json({ error: `jobId "${body.jobId}" is not valid: ${resolved.message} - jobId must be the full on-chain job id (0x + 64 hex chars), not the short task number shown in the marketplace UI.` }, 400);
+      } else if (resolved.kind === "not_found") {
+        return c.json({ error: `jobId "${body.jobId}" was not found - double-check it's the exact on-chain job id.` }, 400);
+      }
+      // kind === "unresolved" - fall through, rawSpec stays "", existing 400 below fires.
     }
   } catch {
     // no/invalid JSON body - rawSpec stays empty, caught below.
@@ -108,9 +116,14 @@ requirementsRoute.post("/verify/requirements", async (c: Context) => {
     return c.json({ error: message }, 502);
   }
 
+  const deliverableRequirements = computeDeliverableRequirements(criteria);
   return c.json({
     spec_hash: quarantinedSpec.hash,
     criteria: criteria.map(previewCriterion),
-    deliverable_requirements: computeDeliverableRequirements(criteria),
+    deliverable_requirements: deliverableRequirements,
+    // Concrete, copy-pasteable example of the `deliverable` field to send to POST /verify for
+    // this exact spec (OKX review: "document the exact request schema"). Send it wrapped as
+    // `{"jobId" or "spec": ..., "deliverable": <this object>}`.
+    deliverable_example: exampleDeliverable(deliverableRequirements),
   });
 });

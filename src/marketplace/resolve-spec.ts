@@ -50,34 +50,60 @@ function defaultRunner(jobId: string): Promise<{ stdout: string }> {
   return execFileAsync("onchainos", ["agent", "common", "context", jobId, "--role", "user", "--agent-id", config.erc8004Id]);
 }
 
+export type ResolveSpecResult =
+  | { ok: true; spec: string }
+  | { ok: false; kind: "invalid_format" | "not_found"; message: string }
+  | { ok: false; kind: "unresolved" };
+
+// Deterministic CLI-level rejections, matched on the `onchainos` error text itself (confirmed
+// live: `agent common context 88213 ...` -> "--jobid invalid (must be `0x` + 64 chars, got 5
+// chars)..."; a well-formed but nonexistent 0x+64-char id -> "...Wallet API error (code=1001):
+// task not found"). Both are instant and will never succeed on retry, unlike a real network/DNS
+// blip - surfacing them immediately (rather than burning the retry budget and then degrading to
+// silent "no spec") is what lets the caller return a clear 400 instead of a paid UNVERIFIABLE
+// verdict for what is really just a malformed request.
+const INVALID_FORMAT_PATTERN = /--jobid invalid/i;
+const NOT_FOUND_PATTERN = /task not found/i;
+
+function classifyError(message: string): "invalid_format" | "not_found" | undefined {
+  if (INVALID_FORMAT_PATTERN.test(message)) return "invalid_format";
+  if (NOT_FOUND_PATTERN.test(message)) return "not_found";
+  return undefined;
+}
+
 /**
  * Never throws. x402 payment is already settled by the time this runs (verify.ts parses the
  * request body after x402Gate has settled payment, and there is no refund path from within the
- * handler), so any failure here - a transient onchainos/DNS blip (observed live this session),
- * a bad/unknown jobId, or an unexpected CLI output shape - must degrade to `undefined` and let
- * the caller fall through to the existing "no spec provided" -> UNVERIFIABLE path. Never worse
- * than today's baseline; never a request that was already paid for ending in a 500.
+ * handler) - but that only licenses silently degrading *transient* failures (a network/DNS blip,
+ * an unparseable CLI output shape) to `{ ok: false, kind: "unresolved" }` and letting the caller
+ * fall through to the existing "no spec provided" -> UNVERIFIABLE path, never worse than today's
+ * baseline. A deterministically wrong jobId (bad format, genuinely doesn't exist) is a different
+ * case - `verify.ts` already returns a 400 post-payment for other definite input errors (e.g.
+ * `SpecQuarantineError`), so those are reported as `invalid_format`/`not_found` instead of being
+ * silently eaten, and are never retried (retrying a deterministic rejection just burns time).
  *
  * `runner` is only ever overridden in tests (resolve-spec.test.ts) - defaults to the real
  * onchainos CLI call in production.
  */
-export async function resolveSpecFromJobId(jobId: string, runner: CommonContextRunner = defaultRunner): Promise<string | undefined> {
+export async function resolveSpecFromJobId(jobId: string, runner: CommonContextRunner = defaultRunner): Promise<ResolveSpecResult> {
   let lastError = "unknown error";
   for (let attempt = 1; attempt <= RESOLVE_MAX_ATTEMPTS; attempt++) {
     try {
       const { stdout } = await runner(jobId);
       const description = extractDescription(stdout);
-      if (description) return description;
+      if (description) return { ok: true, spec: description };
       lastError = "common context output did not contain a parseable Description field";
     } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
+      const kind = classifyError(lastError);
+      if (kind) return { ok: false, kind, message: lastError };
       // Same "transient DNS/network blips against the OKX gateway are observed in practice"
       // reasoning as signVerdict (src/verdict/sign.ts) - retry before giving up rather than
       // silently returning "no spec" on the first blip.
-      lastError = err instanceof Error ? err.message : String(err);
     }
     if (attempt < RESOLVE_MAX_ATTEMPTS) await sleep(RESOLVE_RETRY_DELAY_MS * attempt);
   }
 
   console.warn(`[resolve-spec] failed to resolve spec for jobId=${jobId} after ${RESOLVE_MAX_ATTEMPTS} attempts: ${lastError}`);
-  return undefined;
+  return { ok: false, kind: "unresolved" };
 }

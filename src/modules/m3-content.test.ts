@@ -7,6 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   applyContentChecks,
+  autoFillSingleAssetContentClaims,
   checkBounds,
   checkCoverage,
   checkFormat,
@@ -251,6 +252,63 @@ test("content.no_hallucination: all sourceUrls unreachable -> UNVERIFIABLE, not 
   const asset = factSet({ id: "a1", format: "text", raw: "Some claims citing an unreachable source." });
   const result = await checkNoHallucination(c, { assetId: "a1", sourceUrls: ["http://127.0.0.1:1/unreachable"] }, [asset], "canary");
   assert.equal(result.result, "UNVERIFIABLE");
+});
+
+// ---- single-asset auto-wire (OKX review: undocumented content.coverage[] claims array) ----
+
+test("autoFillSingleAssetContentClaims: single asset, no claims submitted -> fills content.coverage/no_hallucination with {assetId}", () => {
+  const criteria = [criterion("content.coverage", 0, "EXPLICIT", 2), criterion("content.no_hallucination", 0, "EXPLICIT", 2)];
+  const sealed: ContentDeliverableSealed = { content: [factSet({ id: "a1", format: "text", raw: "some text" })] };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, []);
+  assert.deepEqual(filled?.["content.coverage"], [{ assetId: "a1" }]);
+  assert.deepEqual(filled?.["content.no_hallucination"], [{ assetId: "a1" }]);
+});
+
+test("autoFillSingleAssetContentClaims: multiple content.coverage criteria -> fills every index up to the max", () => {
+  const criteria = [criterion("content.coverage", 0, "EXPLICIT", 2), criterion("content.coverage", 1, "EXPLICIT", 2)];
+  const sealed: ContentDeliverableSealed = { content: [factSet({ id: "a1", format: "text", raw: "some text" })] };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, []);
+  assert.deepEqual(filled?.["content.coverage"], [{ assetId: "a1" }, { assetId: "a1" }]);
+});
+
+test("autoFillSingleAssetContentClaims: an explicit claim at an index is never overwritten", () => {
+  const criteria = [criterion("content.coverage", 0, "EXPLICIT", 2)];
+  const sealed: ContentDeliverableSealed = {
+    content: [factSet({ id: "a1", format: "text", raw: "some text" })],
+    "content.coverage": [{ assetId: "explicitly-chosen" }],
+  };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, []);
+  assert.deepEqual(filled?.["content.coverage"], [{ assetId: "explicitly-chosen" }]);
+});
+
+test("autoFillSingleAssetContentClaims: a quarantine-rejected slot is never papered over", () => {
+  const criteria = [criterion("content.coverage", 0, "EXPLICIT", 2)];
+  const sealed: ContentDeliverableSealed = {
+    content: [factSet({ id: "a1", format: "text", raw: "some text" })],
+    "content.coverage": [undefined as never],
+  };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, [{ method: "content.coverage", index: 0, reason: "quarantine rejected malformed claim" }]);
+  assert.equal(filled?.["content.coverage"]?.[0], undefined);
+});
+
+test("autoFillSingleAssetContentClaims: two assets submitted -> no auto-fill, genuine ambiguity", () => {
+  const criteria = [criterion("content.coverage", 0, "EXPLICIT", 2)];
+  const sealed: ContentDeliverableSealed = {
+    content: [factSet({ id: "a1", format: "text", raw: "one" }), factSet({ id: "a2", format: "text", raw: "two" })],
+  };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, []);
+  assert.equal(filled?.["content.coverage"], undefined);
+});
+
+test("autoFillSingleAssetContentClaims: content.presence is untouched (needs real fields, can't be inferred)", () => {
+  const criteria = [criterion("content.presence", 0, "EXPLICIT", 1)];
+  const sealed: ContentDeliverableSealed = { content: [factSet({ id: "a1", format: "text", raw: "some text" })] };
+  const filled = autoFillSingleAssetContentClaims(criteria, sealed, []);
+  assert.equal(filled?.["content.presence"], undefined);
+});
+
+test("autoFillSingleAssetContentClaims: undefined sealed deliverable passes through unchanged", () => {
+  assert.equal(autoFillSingleAssetContentClaims([criterion("content.coverage", 0)], undefined, []), undefined);
 });
 
 // ---- dispatch / cross-family passthrough ----
