@@ -34,7 +34,8 @@ const accepts = { scheme: "exact" as const, network: NETWORK, payTo: config.payT
 const resource = `${config.publicBaseUrl}/verify`;
 const description =
   "Vidimus conformance verdict - signed, evidence-backed verification against onchain, dataset, code, and content deliverables. " +
-  `Before paying, call the free preview endpoint POST ${config.publicBaseUrl}/verify/requirements with the same jobId to see the exact deliverable shape required - avoids paying for a submission that turns out UNVERIFIABLE due to a shape mismatch.`;
+  'POST body must include either "spec" (plain text order description) or "jobId" (the on-chain job id), plus a "deliverable" object matching the compiled criteria. ' +
+  `Before paying, call the free preview endpoint POST ${config.publicBaseUrl}/verify/requirements with the same "spec" or "jobId" to see the exact deliverable shape required, including a copy-pasteable example - avoids paying for a submission that turns out UNVERIFIABLE due to a shape mismatch.`;
 
 export const verifyRoutes: RoutesConfig = {
   "GET /verify": { accepts, resource, description, mimeType: "application/json" },

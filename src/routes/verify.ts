@@ -22,6 +22,7 @@ import { config } from "../config.js";
 import type { Criterion, Verdict, VerdictResult } from "../verdict/types.js";
 import { appendCalibrationEntry } from "../calibration/log.js";
 import { resolveSpecFromJobId } from "../marketplace/resolve-spec.js";
+import { extractPayerAddress, findAcceptedJobIdForPayer } from "../marketplace/resolve-payer-task.js";
 
 export const verifyRoute = new Hono();
 
@@ -62,6 +63,7 @@ function buildSummary(criteria: Criterion[], headline: VerdictResult, headlineBa
 async function handleVerify(c: Context) {
   let rawSpec = "";
   let rawDeliverable: VerifyRequestBody["deliverable"];
+  let jobIdGiven = false;
   try {
     const body = await c.req.json<VerifyRequestBody>();
     if (typeof body?.spec === "string") rawSpec = body.spec;
@@ -70,6 +72,7 @@ async function handleVerify(c: Context) {
     // the task's own public record (see resolve-spec.ts). An explicit `spec` always wins if both
     // are present, so existing callers (scripts/test-buyer.ts) are unaffected.
     if (!rawSpec && typeof body?.jobId === "string" && body.jobId) {
+      jobIdGiven = true;
       const resolved = await resolveSpecFromJobId(body.jobId);
       if (resolved.ok) {
         rawSpec = resolved.spec;
@@ -84,6 +87,25 @@ async function handleVerify(c: Context) {
     }
   } catch {
     // no/invalid JSON body - treat as no spec/deliverable, criteria[] stays empty below.
+  }
+
+  // Fallback for a real observed failure (OKX review): the buyer's own tooling sent neither
+  // `spec` nor `jobId` at all - only fires when the body gave us truly nothing to go on (never
+  // when the buyer explicitly gave a jobId that turned out wrong; that's already a clear 400
+  // above, and silently overriding an explicit-but-wrong input would hide a real bug on their
+  // side rather than surface it). The payer's wallet address is still readable straight off the
+  // payment header they already signed, independent of what the x402 middleware did with it -
+  // see resolve-payer-task.ts for why the SDK doesn't hand this to us any other way.
+  if (!rawSpec && !jobIdGiven) {
+    const paymentHeader = c.req.header("payment-signature") || c.req.header("x-payment");
+    const payer = paymentHeader ? extractPayerAddress(paymentHeader) : undefined;
+    const inferredJobId = payer ? await findAcceptedJobIdForPayer(payer) : undefined;
+    if (inferredJobId) {
+      const resolved = await resolveSpecFromJobId(inferredJobId);
+      if (resolved.ok) rawSpec = resolved.spec;
+      // any other outcome - fall through exactly as if this fallback never ran; it was never
+      // guaranteed to resolve anything.
+    }
   }
 
   // M5 quarantine (docs/SECURITY.md §2.1): every ingest surface is sealed before anything
@@ -154,6 +176,24 @@ async function handleVerify(c: Context) {
         return c.json({ error: message }, 502);
       }
     }
+  }
+
+  // OKX review: a submission that produced literally nothing to check (no spec/jobId resolved,
+  // including after the payer-task fallback above) was returning a signed-but-useless 200
+  // UNVERIFIABLE verdict, billed like any real result. `injectionSuspected` is deliberately
+  // excluded - that case means the buyer DID send a spec, it was just flagged as a suspected
+  // attack, a real chargeable outcome, not a "nothing was sent" one. Confirmed via the OKX
+  // Payment SDK's own source (@okxweb3/x402-hono): settlement is skipped for any response
+  // status >= 400, so this 400 also means the buyer is not charged for the no-op - not just a
+  // clearer error, the actual fix for the billing complaint too.
+  if (!injectionSuspected && criteria.length === 0) {
+    return c.json(
+      {
+        error:
+          'no checkable input received: provide either "spec" (plain text) or a valid "jobId" (the on-chain job id), plus a "deliverable" matching the compiled criteria - see POST /verify/requirements for the exact shape.',
+      },
+      400,
+    );
   }
 
   const { headline, headline_basis } = injectionSuspected

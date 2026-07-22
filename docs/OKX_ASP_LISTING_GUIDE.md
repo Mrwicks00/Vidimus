@@ -162,6 +162,25 @@ settlement (a tx hash, e.g.), it won't exist yet at handler time - either move t
 metadata outside anything you cryptographically sign, or rely on the standard `PAYMENT-RESPONSE`
 header the SDK attaches to the same HTTP response instead of duplicating it in the body.
 
+**Settlement is skipped entirely if your handler returns status >= 400** (confirmed by reading
+`@okxweb3/x402-hono`'s compiled source, not just its types: `if (res.status >= 400) return;`
+right after `await next()`, before `processSettlement` is ever called). This is load-bearing, not
+just an implementation detail - it means "return 400 for a request that gave you nothing checkable"
+is simultaneously the fix for "give an actionable error" *and* "don't bill for a no-op verdict".
+A route handler that always returns 200 (even a signed-but-empty UNVERIFIABLE verdict) will always
+charge the buyer; a route handler that returns 400 for genuinely bad/missing input never will.
+
+Also worth designing for up front: **the x402 protocol carries no job/task correlator by
+itself** - a paid replay is just a signed payment against your fixed resource URL, nothing more.
+If your buyer's own tooling forgets to include a `jobId`/`spec` in the request body (observed
+live via an OKX review), you have no way to know which task this is for *from the payment alone*
+- except that the payment header does carry the payer's wallet address
+(`decodePaymentSignatureHeader` from `@okxweb3/x402-core/http`, `payload.authorization.from` for
+the `exact` EIP-3009 scheme), which you can correlate against your own in-progress/accepted task
+list (`onchainos agent task-in-progress`) as a best-effort fallback - see
+`src/marketplace/resolve-payer-task.ts`. Only trust this when exactly one task matches; multiple
+concurrent accepted tasks from the same buyer are genuinely ambiguous and should never be guessed.
+
 ## 4. Fast local iteration loop
 
 Testing only against production Render costs a full deploy-and-wait cycle per guess. Faster path:
