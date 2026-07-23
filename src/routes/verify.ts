@@ -28,6 +28,32 @@ export const verifyRoute = new Hono();
 
 const ZERO_HASH = `sha256:${"0".repeat(64)}`;
 
+// OKX review: a paid request that needed multiple checks (onchain + content) failed transport-
+// level while payment still settled - only possible if our own handler actually finished and
+// returned 200 (settlement fires after that, confirmed via the SDK source), meaning the
+// client-facing connection died before the response arrived. Researched cause: hosting
+// platforms' edge proxies have been observed killing long-held connections well before their
+// own documented timeout (see docs/OKX_ASP_LISTING_GUIDE.md §3.3) - this isn't fixable by
+// picking a different host, since our own worst-case latency can outrun any of them. Two-part
+// fix: run the checks concurrently (below) and bound the whole thing with a deadline we control.
+const VERIFY_DEADLINE_MS = 45_000;
+
+class VerificationTimeoutError extends Error {}
+
+function timeoutAfter(ms: number): Promise<never> {
+  return new Promise((_, reject) => setTimeout(() => reject(new VerificationTimeoutError()), ms));
+}
+
+// Each applyXChecks call already parallelizes its own internal work (Promise.all over its own
+// criteria) and explicitly ignores any criterion outside its own method family (every one starts
+// with `if (!locator || !isXMethod(locator.method)) return c;`) - so all four are safe to run
+// concurrently against the same compiled criteria and merge, rather than chaining them
+// sequentially. At most one result array will ever actually change a given criterion, since a
+// criterion belongs to exactly one method family.
+export function mergeCheckedCriteria(original: Criterion[], ...results: Criterion[][]): Criterion[] {
+  return original.map((c, i) => results.find((r) => r[i] !== c)?.[i] ?? c);
+}
+
 interface VerifyRequestBody {
   jobId?: string;
   spec?: string;
@@ -156,21 +182,40 @@ async function handleVerify(c: Context) {
   let criteria: Verdict["criteria"] = [];
   let injectionSuspected = false;
   if (quarantinedSpec) {
-    try {
-      criteria = await compileCriteria(quarantinedSpec.text, quarantinedSpec.canary);
-      criteria = await applyOnchainChecks(criteria, sealedOnchain, onchainRejected);
-      criteria = await applyDataChecks(criteria, sealedData, dataRejected, deliverableHash);
-      criteria = await applyCodeChecks(criteria, sealedCode, codeRejected);
+    const spec = quarantinedSpec;
+    const runChecks = async (): Promise<Criterion[]> => {
+      const compiled = await compileCriteria(spec.text, spec.canary);
       // Single-asset auto-wire (OKX review): deliverableHash above already committed to the
       // buyer's real submission - this only affects what the checkers see, never the commitment.
-      const effectiveSealedContent = autoFillSingleAssetContentClaims(criteria, sealedContent, contentRejected);
-      criteria = await applyContentChecks(criteria, effectiveSealedContent, contentRejected, quarantinedSpec.canary);
+      const effectiveSealedContent = autoFillSingleAssetContentClaims(compiled, sealedContent, contentRejected);
+      // All four run concurrently against the same compiled criteria and merge - each already
+      // parallelizes its own internal work and ignores criteria outside its own method family,
+      // so the old sequential chaining here only added latency, never correctness.
+      const [onchainResult, dataResult, codeResult, contentResult] = await Promise.all([
+        applyOnchainChecks(compiled, sealedOnchain, onchainRejected),
+        applyDataChecks(compiled, sealedData, dataRejected, deliverableHash),
+        applyCodeChecks(compiled, sealedCode, codeRejected),
+        applyContentChecks(compiled, effectiveSealedContent, contentRejected, spec.canary),
+      ]);
+      return mergeCheckedCriteria(compiled, onchainResult, dataResult, codeResult, contentResult);
+    };
+
+    try {
+      criteria = await Promise.race([runChecks(), timeoutAfter(VERIFY_DEADLINE_MS)]);
     } catch (err) {
       if (err instanceof InjectionSuspectedError) {
         // SECURITY.md §3: a tripped canary means the job is compromised input - do not emit
         // PASS, do not trust anything the model produced. Never a silent pass.
         injectionSuspected = true;
-        console.warn(`[m5] injection suspected: job spec_hash=${quarantinedSpec.hash} - ${err.message}`);
+        console.warn(`[m5] injection suspected: job spec_hash=${spec.hash} - ${err.message}`);
+      } else if (err instanceof VerificationTimeoutError) {
+        // The underlying LLM/RPC calls aren't forcibly cancelled here - they keep running until
+        // their own bounded retry/timeout budgets finish, but nothing further reads their result
+        // once we've already returned this response. Status >= 400 means the SDK's payment
+        // middleware skips settlement (confirmed via its source earlier) - a real customer isn't
+        // charged for a job that couldn't finish in time, unlike the connection-drop failure
+        // mode this whole change exists to fix.
+        return c.json({ error: "verification did not complete within the time budget - not charged (this response's status means the x402 middleware skips settlement)." }, 504);
       } else {
         const message = err instanceof Error ? err.message : "criteria compilation failed";
         return c.json({ error: message }, 502);

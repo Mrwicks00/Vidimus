@@ -30,7 +30,7 @@ import {
 // paid /verify replay hung past 5 minutes with no response at all, which is indistinguishable
 // from a dead server to any caller (including OKX's own ASP validator) - bounding each attempt
 // here keeps the outer retry loop, not the SDK, in control of worst-case latency.
-const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 20_000, maxRetries: 0 });
+const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 15_000, maxRetries: 0 });
 
 const METHOD_NAMES = Object.keys(METHOD_REGISTRY) as [Method, ...Method[]];
 
@@ -187,7 +187,11 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const COMPILE_MAX_ATTEMPTS = 3;
+// Tightened from 3x20s (60s worst case) to 2x15s (30s worst case) so this call's own retry
+// budget leaves real headroom under /verify's outer request deadline (src/routes/verify.ts) -
+// a mismatch where the inner bound alone could exceed the outer one meant the outer deadline
+// would always fire mid-compile, making the later retry attempts dead code under load anyway.
+const COMPILE_MAX_ATTEMPTS = 2;
 const COMPILE_RETRY_DELAY_MS = 500;
 
 /**

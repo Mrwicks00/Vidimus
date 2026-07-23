@@ -12,10 +12,13 @@ import { containsCanary, InjectionSuspectedError } from "./m2-criteria-compiler.
 
 // Bounded timeout, SDK retries disabled - same reasoning as m2-criteria-compiler.ts's client:
 // this module's own retry loop below should own worst-case latency, not the SDK's 10-minute default.
-const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 20_000, maxRetries: 0 });
+const openrouter = new OpenAI({ apiKey: config.openrouterApiKey, baseURL: "https://openrouter.ai/api/v1", timeout: 15_000, maxRetries: 0 });
 const DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
 
-const RETRY_MAX_ATTEMPTS = 3;
+// Tightened from 3x20s (60s worst case) to 2x15s (30s worst case) - same reasoning as
+// m2-criteria-compiler.ts's COMPILE_MAX_ATTEMPTS: leaves real headroom under /verify's outer
+// request deadline instead of the two bounds fighting each other under load.
+const RETRY_MAX_ATTEMPTS = 2;
 const RETRY_DELAY_MS = 500;
 
 function sleep(ms: number): Promise<void> {
